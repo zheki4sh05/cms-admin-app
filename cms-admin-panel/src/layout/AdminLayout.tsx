@@ -23,6 +23,7 @@ import MenuIcon from '@mui/icons-material/Menu'
 import PeopleOutlinedIcon from '@mui/icons-material/PeopleOutlined'
 import PersonOutlinedIcon from '@mui/icons-material/PersonOutlined'
 import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined'
+import ShieldOutlinedIcon from '@mui/icons-material/ShieldOutlined'
 import { alpha, useTheme } from '@mui/material/styles'
 import { useState, type ElementType } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
@@ -40,6 +41,7 @@ type NavItem = {
 const navItemsMain: readonly NavItem[] = [
   { to: '/app/dashboard', label: 'Рабочий стол', Icon: DashboardOutlinedIcon },
   { to: '/app/users', label: 'Пользователи', Icon: PeopleOutlinedIcon },
+  { to: '/app/risk-objects', label: 'Рисковые объекты', Icon: ShieldOutlinedIcon },
   { to: '/app/integration', label: 'Интеграция', Icon: HubOutlinedIcon },
 ]
 

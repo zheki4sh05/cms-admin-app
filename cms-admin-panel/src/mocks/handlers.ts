@@ -131,6 +131,113 @@ function buildMockIntegrationChangeHistory(count: number) {
 /** Достаточно страниц для демонстрации бесконечной прокрутки (по 5 записей). */
 const mockIntegrationChangeHistory = buildMockIntegrationChangeHistory(48)
 
+const mockRiskObjectModels = [
+  { id: 'rom-1', name: 'Юридическое лицо' },
+  { id: 'rom-2', name: 'Индивидуальный предприниматель' },
+  { id: 'rom-3', name: 'Физическое лицо' },
+  { id: 'rom-4', name: 'Группа компаний' },
+]
+
+let integrationDraftCurrent: Record<string, unknown> | null = null
+
+let mockRiskObjects = [
+  {
+    id: 'ro-1',
+    code: 'RO-001',
+    name: 'ООО «Вектор»',
+    category: 'Контрагент',
+    status: 'active' as const,
+    updatedAt: '2026-04-12T10:15:00.000Z',
+  },
+  {
+    id: 'ro-2',
+    code: 'RO-002',
+    name: 'ИП Соколов',
+    category: 'Контрагент',
+    status: 'active' as const,
+    updatedAt: '2026-04-11T14:40:00.000Z',
+  },
+  {
+    id: 'ro-3',
+    code: 'RO-003',
+    name: 'АО «Трастфлоу Логистик»',
+    category: 'Перевозчик',
+    status: 'active' as const,
+    updatedAt: '2026-04-10T09:00:00.000Z',
+  },
+  {
+    id: 'ro-4',
+    code: 'RO-004',
+    name: 'ПАО «Северный банк»',
+    category: 'Финансовая организация',
+    status: 'archived' as const,
+    updatedAt: '2026-03-28T16:20:00.000Z',
+  },
+  {
+    id: 'ro-5',
+    code: 'RO-005',
+    name: 'ООО «Ромашка»',
+    category: 'Контрагент',
+    status: 'active' as const,
+    updatedAt: '2026-04-09T11:30:00.000Z',
+  },
+  {
+    id: 'ro-6',
+    code: 'RO-006',
+    name: 'ГК «Альфа»',
+    category: 'Группа',
+    status: 'active' as const,
+    updatedAt: '2026-04-08T08:45:00.000Z',
+  },
+]
+
+const RO_HISTORY_TEMPLATES = [
+  {
+    riskObjectName: 'ООО «Вектор»',
+    description: 'Обновлены реквизиты и контактные лица',
+    authorName: 'Алексей Иванов',
+  },
+  {
+    riskObjectName: 'ИП Соколов',
+    description: 'Изменена категория риска',
+    authorName: 'Мария Петрова',
+  },
+  {
+    riskObjectName: 'АО «Трастфлоу Логистик»',
+    description: 'Проверка документов: одобрено',
+    authorName: 'Иван Сидоров',
+  },
+  {
+    riskObjectName: 'ПАО «Северный банк»',
+    description: 'Объект переведён в архив',
+    authorName: 'Мария Петрова',
+  },
+  {
+    riskObjectName: 'ООО «Ромашка»',
+    description: 'Добавлена связь с договором',
+    authorName: 'Алексей Иванов',
+  },
+]
+
+function buildMockRiskObjectChangeHistory(count: number) {
+  return Array.from({ length: count }, (_, i) => {
+    const t = RO_HISTORY_TEMPLATES[i % RO_HISTORY_TEMPLATES.length]
+    const day = 1 + (i % 28)
+    const hour = 8 + (i % 11)
+    const minute = (i * 9) % 60
+    const pad = (n: number) => String(n).padStart(2, '0')
+    return {
+      id: `roh-${i + 1}`,
+      changedAt: `2026-04-${pad(day)}T${pad(hour)}:${pad(minute)}:00.000Z`,
+      riskObjectName: t.riskObjectName,
+      description: `${t.description} (#${i + 1})`,
+      authorName: t.authorName,
+    }
+  })
+}
+
+const mockRiskObjectChangeHistory = buildMockRiskObjectChangeHistory(42)
+
 function parseAuth(request: Request): string | null {
   const header = request.headers.get('Authorization')
   if (!header?.startsWith('Bearer ')) return null
@@ -242,6 +349,106 @@ export const handlers = [
     const items = pool.slice(start, start + pageSize)
     const hasMore = start + items.length < pool.length
     return HttpResponse.json({ items, hasMore })
+  }),
+
+  http.get('/api/risk-object-models', async ({ request }) => {
+    await delay(220)
+    const token = parseAuth(request)
+    if (token !== MOCK_TOKEN) {
+      return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
+    }
+    const url = new URL(request.url)
+    if (url.searchParams.get('empty') === '1') {
+      return HttpResponse.json({ items: [] as { id: string; name: string }[] })
+    }
+    return HttpResponse.json({ items: mockRiskObjectModels })
+  }),
+
+  http.post('/api/risk-objects', async ({ request }) => {
+    await delay(320)
+    const token = parseAuth(request)
+    if (token !== MOCK_TOKEN) {
+      return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
+    }
+    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>
+    const nameRaw = body.name
+    const name =
+      typeof nameRaw === 'string' && nameRaw.trim() !== ''
+        ? nameRaw.trim()
+        : 'Новый рисковый объект'
+    const id = `ro-${Date.now()}`
+    const n = mockRiskObjects.length + 1
+    const code = `RO-${String(n).padStart(3, '0')}`
+    const row = {
+      id,
+      code,
+      name,
+      category: 'Конструктор',
+      status: 'active' as const,
+      updatedAt: new Date().toISOString(),
+    }
+    mockRiskObjects = [row, ...mockRiskObjects]
+    return HttpResponse.json(
+      { id, savedAt: row.updatedAt },
+      { status: 201 },
+    )
+  }),
+
+  http.get('/api/risk-objects', async ({ request }) => {
+    await delay(260)
+    const token = parseAuth(request)
+    if (token !== MOCK_TOKEN) {
+      return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
+    }
+    return HttpResponse.json({ items: mockRiskObjects })
+  }),
+
+  http.get('/api/risk-objects/change-history', async ({ request }) => {
+    await delay(270)
+    const token = parseAuth(request)
+    if (token !== MOCK_TOKEN) {
+      return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
+    }
+    const url = new URL(request.url)
+    const page = Math.max(1, Number.parseInt(url.searchParams.get('page') ?? '1', 10) || 1)
+    const rawSize = Number.parseInt(url.searchParams.get('pageSize') ?? '5', 10)
+    const pageSize = Math.min(50, Math.max(1, Number.isFinite(rawSize) ? rawSize : 5))
+
+    const q = (url.searchParams.get('q') ?? '').trim().toLowerCase()
+    let pool = mockRiskObjectChangeHistory
+    if (q) {
+      pool = pool.filter(
+        (row) =>
+          row.riskObjectName.toLowerCase().includes(q) ||
+          row.description.toLowerCase().includes(q) ||
+          row.authorName.toLowerCase().includes(q),
+      )
+    }
+
+    const start = (page - 1) * pageSize
+    const items = pool.slice(start, start + pageSize)
+    const hasMore = start + items.length < pool.length
+    return HttpResponse.json({ items, hasMore })
+  }),
+
+  http.put('/api/integration-drafts/current', async ({ request }) => {
+    await delay(240)
+    const token = parseAuth(request)
+    if (token !== MOCK_TOKEN) {
+      return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
+    }
+    const body = (await request.json()) as Record<string, unknown>
+    const updatedAt = new Date().toISOString()
+    integrationDraftCurrent = {
+      ...integrationDraftCurrent,
+      ...body,
+      updatedAt,
+    }
+    return HttpResponse.json({
+      id: 'draft-current',
+      updatedAt,
+      ...integrationDraftCurrent,
+    })
   }),
 
   http.put('/api/settings', async ({ request }) => {

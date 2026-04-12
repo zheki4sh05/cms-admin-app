@@ -7,6 +7,8 @@ import { IntegrationCreatePage } from './pages/IntegrationCreatePage'
 import { IntegrationPage } from './pages/IntegrationPage'
 import { LoginPage } from './pages/LoginPage'
 import { ProfilePage } from './pages/ProfilePage'
+import { RiskObjectCreatePage } from './pages/RiskObjectCreatePage'
+import { RiskObjectsPage } from './pages/RiskObjectsPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { UsersPage } from './pages/UsersPage'
 import { RequireAuth } from './routes/RequireAuth'
@@ -25,6 +27,8 @@ function App() {
                 <Route index element={<Navigate to="dashboard" replace />} />
                 <Route path="dashboard" element={<DashboardPage />} />
                 <Route path="users" element={<UsersPage />} />
+                <Route path="risk-objects/new" element={<RiskObjectCreatePage />} />
+                <Route path="risk-objects" element={<RiskObjectsPage />} />
                 <Route path="settings" element={<SettingsPage />} />
                 <Route path="integration/new" element={<IntegrationCreatePage />} />
                 <Route path="integration" element={<IntegrationPage />} />
