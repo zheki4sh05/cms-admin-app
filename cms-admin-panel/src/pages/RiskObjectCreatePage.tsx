@@ -15,8 +15,8 @@ import {
   DialogContentText,
   DialogTitle,
   FormControl,
+  FormLabel,
   IconButton,
-  InputLabel,
   MenuItem,
   Paper,
   Select,
@@ -574,10 +574,11 @@ export function RiskObjectCreatePage() {
                       </Box>
 
                       <FormControl fullWidth size="small">
-                        <InputLabel id={`vk-${field.id}`}>Тип значения</InputLabel>
+                        <FormLabel id={`vk-${field.id}`} sx={{ mb: 0.75, display: 'block' }}>
+                          Тип значения
+                        </FormLabel>
                         <Select
-                          labelId={`vk-${field.id}`}
-                          label="Тип значения"
+                          aria-labelledby={`vk-${field.id}`}
                           value={field.valueKind}
                           onChange={(e) =>
                             setRootValueKind(field.id, e.target.value as ValueKind)

@@ -132,10 +132,45 @@ function buildMockIntegrationChangeHistory(count: number) {
 const mockIntegrationChangeHistory = buildMockIntegrationChangeHistory(48)
 
 const mockRiskObjectModels = [
-  { id: 'rom-1', name: 'Юридическое лицо' },
-  { id: 'rom-2', name: 'Индивидуальный предприниматель' },
-  { id: 'rom-3', name: 'Физическое лицо' },
-  { id: 'rom-4', name: 'Группа компаний' },
+  {
+    id: 'rom-1',
+    name: 'Юридическое лицо',
+    definition: {
+      Ref_Key: null,
+      Date: null,
+      external_id: null,
+      timestamp: null,
+      legal_name: null,
+      inn: null,
+    },
+  },
+  {
+    id: 'rom-2',
+    name: 'Индивидуальный предприниматель',
+    definition: {
+      inn: null,
+      ogrnip: null,
+      full_name: null,
+      contacts: [{ phone: null, email: null }],
+    },
+  },
+  {
+    id: 'rom-3',
+    name: 'Физическое лицо',
+    definition: {
+      passport: null,
+      birthDate: null,
+      snils: null,
+    },
+  },
+  {
+    id: 'rom-4',
+    name: 'Группа компаний',
+    definition: {
+      group_id: null,
+      members: [{ role: null, company_code: null }],
+    },
+  },
 ]
 
 let integrationDraftCurrent: Record<string, unknown> | null = null

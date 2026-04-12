@@ -4,7 +4,7 @@ import {
   Button,
   FormControl,
   FormControlLabel,
-  InputLabel,
+  FormLabel,
   MenuItem,
   Select,
   Stack,
@@ -112,10 +112,11 @@ export function SettingsPage() {
           label="Режим обслуживания"
         />
         <FormControl fullWidth disabled={loading}>
-          <InputLabel id="region-label">Регион API</InputLabel>
+          <FormLabel id="region-label" sx={{ mb: 0.75, display: 'block' }}>
+            Регион API
+          </FormLabel>
           <Select
-            labelId="region-label"
-            label="Регион API"
+            aria-labelledby="region-label"
             value={apiRegion}
             onChange={(e) => setApiRegion(e.target.value)}
           >
