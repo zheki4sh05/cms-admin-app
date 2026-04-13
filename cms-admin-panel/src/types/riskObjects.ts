@@ -4,17 +4,26 @@ export type RiskObject = {
   id: string
   code: string
   name: string
-  category: string
   status: RiskObjectStatus
   updatedAt: string
 }
 
+export type RiskObjectListPage = {
+  items: RiskObject[]
+  hasMore: boolean
+}
+
 export type RiskObjectHistoryEntry = {
   id: string
+  riskObjectId?: string
   changedAt: string
   riskObjectName: string
   description: string
   authorName: string
+}
+
+export type RiskObjectHistoryDetails = RiskObjectHistoryEntry & {
+  riskObjectId: string
 }
 
 export type RiskObjectHistoryPage = {
@@ -34,6 +43,10 @@ export type RiskObjectCreatePayload = {
   definition: Record<string, unknown>
 }
 
+export type RiskObjectUpdatePayload = RiskObjectCreatePayload & {
+  changeComment?: string
+}
+
 export type RiskObjectDetails = {
   id: string
   code: string
@@ -46,4 +59,8 @@ export type RiskObjectDetails = {
 export type RiskObjectUpdateResponse = {
   id: string
   savedAt: string
+}
+
+export type RiskObjectStatusUpdatePayload = {
+  status: RiskObjectStatus
 }

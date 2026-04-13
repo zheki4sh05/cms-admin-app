@@ -11,6 +11,7 @@ import { getMe, postLogin } from '../api/client'
 import type { AppUser } from '../types/user'
 
 const STORAGE_KEY = 'trustflow_access_token'
+const COMPANY_ID_STORAGE_KEY = 'trustflow_company_id'
 
 type AuthContextValue = {
   user: AppUser | null
@@ -32,6 +33,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(() => {
     localStorage.removeItem(STORAGE_KEY)
+    localStorage.removeItem(COMPANY_ID_STORAGE_KEY)
     setToken(null)
     setUser(null)
   }, [])
@@ -42,6 +44,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return
     }
     const data = (await getMe(token)) as AppUser
+    if (data.companyId?.trim()) {
+      localStorage.setItem(COMPANY_ID_STORAGE_KEY, data.companyId)
+    } else {
+      localStorage.removeItem(COMPANY_ID_STORAGE_KEY)
+    }
     setUser(data)
   }, [token])
 
@@ -56,7 +63,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     getMe(token)
       .then((data) => {
         if (!cancelled) {
-          setUser(data as AppUser)
+          const nextUser = data as AppUser
+          if (nextUser.companyId?.trim()) {
+            localStorage.setItem(COMPANY_ID_STORAGE_KEY, nextUser.companyId)
+          } else {
+            localStorage.removeItem(COMPANY_ID_STORAGE_KEY)
+          }
+          setUser(nextUser)
         }
       })
       .catch(() => {
@@ -77,6 +90,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(async (email: string, password: string) => {
     const { accessToken, user: nextUser } = await postLogin(email, password)
     localStorage.setItem(STORAGE_KEY, accessToken)
+    if ((nextUser as AppUser).companyId?.trim()) {
+      localStorage.setItem(COMPANY_ID_STORAGE_KEY, (nextUser as AppUser).companyId)
+    } else {
+      localStorage.removeItem(COMPANY_ID_STORAGE_KEY)
+    }
     setToken(accessToken)
     setUser(nextUser as AppUser)
   }, [])

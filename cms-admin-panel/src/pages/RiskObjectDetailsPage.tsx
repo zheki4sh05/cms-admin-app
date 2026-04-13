@@ -30,10 +30,17 @@ import {
 } from '@mui/material'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { SyntheticEvent } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
-import { getRiskObjectById, putRiskObjectById } from '../api/client'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import {
+  getRiskObjectById,
+  putRiskObjectById,
+  putRiskObjectStatusById,
+} from '../api/client'
 import { useAuth } from '../auth/AuthContext'
-import type { RiskObjectCreatePayload } from '../types/riskObjects'
+import type {
+  RiskObjectStatusUpdatePayload,
+  RiskObjectUpdatePayload,
+} from '../types/riskObjects'
 
 function newId() {
   return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`
@@ -153,13 +160,20 @@ function rootFieldsFromDefinition(definition: Record<string, unknown>): RootFiel
 export function RiskObjectDetailsPage() {
   const navigate = useNavigate()
   const { id = '' } = useParams()
+  const [searchParams] = useSearchParams()
   const { token } = useAuth()
+  const isReadOnlyView = searchParams.get('readonly') === '1'
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [editingEnabled, setEditingEnabled] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [statusUpdating, setStatusUpdating] = useState(false)
   const [clearDialogOpen, setClearDialogOpen] = useState(false)
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false)
+  const [saveComment, setSaveComment] = useState('')
+  const [saveCommentError, setSaveCommentError] = useState(false)
+  const canEdit = editingEnabled && !isReadOnlyView
 
   const [name, setName] = useState('')
   const [code, setCode] = useState('')
@@ -252,13 +266,20 @@ export function RiskObjectDetailsPage() {
   }, [initialSnapshot, setFromSnapshot, showToast])
 
   const handleSave = useCallback(async () => {
+    if (isReadOnlyView) return
     if (!token || !id) {
       showToast({ severity: 'error', text: 'Нет сессии — войдите снова.' })
       return
     }
-    const payload: RiskObjectCreatePayload = {
+    const comment = saveComment.trim()
+    if (!comment) {
+      setSaveCommentError(true)
+      return
+    }
+    const payload: RiskObjectUpdatePayload = {
       name: name.trim(),
       definition: buildPayloadObject(rootFields),
+      changeComment: comment,
     }
     setSaving(true)
     try {
@@ -273,6 +294,9 @@ export function RiskObjectDetailsPage() {
       }
       setInitialSnapshot(snapshot)
       setEditingEnabled(false)
+      setSaveDialogOpen(false)
+      setSaveComment('')
+      setSaveCommentError(false)
       showToast({ severity: 'success', text: 'Изменения сохранены.' })
     } catch (e: unknown) {
       showToast({
@@ -282,7 +306,51 @@ export function RiskObjectDetailsPage() {
     } finally {
       setSaving(false)
     }
-  }, [token, id, name, rootFields, code, status, showToast])
+  }, [isReadOnlyView, token, id, name, rootFields, code, status, saveComment, showToast])
+
+  const handleStatusSwitch = useCallback(
+    async (checked: boolean) => {
+      if (isReadOnlyView) return
+      if (!token || !id) {
+        showToast({ severity: 'error', text: 'Нет сессии — войдите снова.' })
+        return
+      }
+      const prevStatus = status
+      const nextStatus: 'active' | 'archived' = checked ? 'active' : 'archived'
+      setStatus(nextStatus)
+      setStatusUpdating(true)
+      try {
+        const payload: RiskObjectStatusUpdatePayload = {
+          status: nextStatus,
+        }
+        const result = await putRiskObjectStatusById(token, id, payload)
+        setUpdatedAt(result.savedAt)
+        setInitialSnapshot((prev) =>
+          prev
+            ? {
+                ...prev,
+                status: nextStatus,
+                updatedAt: result.savedAt,
+                rootFields,
+              }
+            : prev,
+        )
+        showToast({
+          severity: 'success',
+          text: nextStatus === 'active' ? 'Статус: Active.' : 'Статус: Disable.',
+        })
+      } catch (e: unknown) {
+        setStatus(prevStatus)
+        showToast({
+          severity: 'error',
+          text: e instanceof Error ? e.message : 'Не удалось обновить статус',
+        })
+      } finally {
+        setStatusUpdating(false)
+      }
+    },
+    [isReadOnlyView, token, id, status, rootFields, showToast],
+  )
 
   const handleExport = useCallback(() => {
     const text = JSON.stringify(buildPayloadObject(rootFields), null, 2)
@@ -429,23 +497,45 @@ export function RiskObjectDetailsPage() {
           Просмотр рискового объекта
         </Typography>
         <Stack direction="row" flexWrap="wrap" sx={{ gap: 1, alignItems: 'center' }}>
-          <Button size="small" variant="contained" startIcon={<SaveOutlinedIcon />} onClick={() => void handleSave()} disabled={!editingEnabled || saving}>
+          <Button
+            size="small"
+            variant="contained"
+            startIcon={<SaveOutlinedIcon />}
+            onClick={() => {
+              setSaveDialogOpen(true)
+              setSaveCommentError(false)
+            }}
+            disabled={!canEdit || saving}
+          >
             Сохранить
           </Button>
           <Button size="small" variant="outlined" startIcon={<FileDownloadOutlinedIcon />} onClick={handleExport}>
             Экспорт
           </Button>
-          <Button size="small" variant="outlined" color="warning" startIcon={<ClearAllOutlinedIcon />} onClick={() => setClearDialogOpen(true)}>
+          <Button
+            size="small"
+            variant="outlined"
+            color="warning"
+            startIcon={<ClearAllOutlinedIcon />}
+            onClick={() => setClearDialogOpen(true)}
+            disabled={!canEdit}
+          >
             Сбросить
           </Button>
         </Stack>
       </Box>
 
-      <FormControlLabel
-        sx={{ mb: 2 }}
-        control={<Switch checked={editingEnabled} onChange={(e) => setEditingEnabled(e.target.checked)} />}
-        label="Начать редактирование"
-      />
+      {isReadOnlyView ? (
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          Страница открыта в режиме просмотра: редактирование отключено.
+        </Typography>
+      ) : (
+        <FormControlLabel
+          sx={{ mb: 2 }}
+          control={<Switch checked={editingEnabled} onChange={(e) => setEditingEnabled(e.target.checked)} />}
+          label="Начать редактирование"
+        />
+      )}
 
       <Dialog open={clearDialogOpen} onClose={() => setClearDialogOpen(false)}>
         <DialogTitle>Сбросить изменения?</DialogTitle>
@@ -468,6 +558,44 @@ export function RiskObjectDetailsPage() {
         </DialogActions>
       </Dialog>
 
+      <Dialog open={saveDialogOpen} onClose={() => setSaveDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Комментарий к изменениям</DialogTitle>
+        <DialogContent>
+          <DialogContentText sx={{ mb: 1.5 }}>
+            Укажите обязательный комментарий, описывающий внесённые изменения.
+          </DialogContentText>
+          <TextField
+            label="Комментарий"
+            value={saveComment}
+            onChange={(e) => {
+              setSaveComment(e.target.value)
+              if (saveCommentError && e.target.value.trim()) setSaveCommentError(false)
+            }}
+            error={saveCommentError}
+            helperText={saveCommentError ? 'Комментарий обязателен' : undefined}
+            multiline
+            minRows={3}
+            fullWidth
+            autoFocus
+            autoComplete="off"
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => {
+              setSaveDialogOpen(false)
+              setSaveComment('')
+              setSaveCommentError(false)
+            }}
+          >
+            Отмена
+          </Button>
+          <Button variant="contained" onClick={() => void handleSave()} disabled={saving}>
+            Сохранить
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       <Box
         sx={{
           display: 'flex',
@@ -483,14 +611,26 @@ export function RiskObjectDetailsPage() {
             value={name}
             onChange={(e) => setName(e.target.value)}
             fullWidth
-            disabled={!editingEnabled}
+            disabled={!canEdit}
             autoComplete="off"
           />
-          <TextField
-            label="Статус"
-            value={status === 'active' ? 'Активен' : 'В архиве'}
-            fullWidth
-            disabled
+          <FormControlLabel
+            control={
+              <Switch
+                checked={status === 'active'}
+                onChange={(e) => void handleStatusSwitch(e.target.checked)}
+                disabled={statusUpdating || saving || isReadOnlyView}
+              />
+            }
+            label={
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Typography variant="body2">Статус:</Typography>
+                <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                  {status === 'active' ? 'Active' : 'Disable'}
+                </Typography>
+                {statusUpdating ? <CircularProgress size={14} /> : null}
+              </Box>
+            }
           />
           <TextField label="Обновлён" value={updatedAt ? new Date(updatedAt).toLocaleString('ru-RU') : ''} fullWidth disabled />
 
@@ -499,9 +639,11 @@ export function RiskObjectDetailsPage() {
               Конструктор JSON
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-              В режиме просмотра поля отключены. Включите «Начать редактирование», чтобы менять структуру.
+              {isReadOnlyView
+                ? 'Эта карточка открыта только для просмотра.'
+                : 'В режиме просмотра поля отключены. Включите «Начать редактирование», чтобы менять структуру.'}
             </Typography>
-            <Button variant="outlined" onClick={addRootField} sx={{ mb: 2 }} disabled={!editingEnabled}>
+            <Button variant="outlined" onClick={addRootField} sx={{ mb: 2 }} disabled={!canEdit}>
               Добавить ключ
             </Button>
 
@@ -523,9 +665,9 @@ export function RiskObjectDetailsPage() {
                           sx={{ flex: '1 1 200px', minWidth: 0 }}
                           placeholder={`ключ_${index + 1}`}
                           autoComplete="off"
-                          disabled={!editingEnabled}
+                          disabled={!canEdit}
                         />
-                        <IconButton aria-label="Удалить поле" color="error" onClick={() => removeRootField(field.id)} sx={{ mt: 0.5 }} disabled={!editingEnabled}>
+                        <IconButton aria-label="Удалить поле" color="error" onClick={() => removeRootField(field.id)} sx={{ mt: 0.5 }} disabled={!canEdit}>
                           <DeleteOutlinedIcon />
                         </IconButton>
                       </Box>
@@ -538,7 +680,7 @@ export function RiskObjectDetailsPage() {
                           aria-labelledby={`vk-${field.id}`}
                           value={field.valueKind}
                           onChange={(e) => setRootValueKind(field.id, e.target.value as ValueKind)}
-                          disabled={!editingEnabled}
+                          disabled={!canEdit}
                         >
                           <MenuItem value="text">Простой текст</MenuItem>
                           <MenuItem value="array">Массив</MenuItem>
@@ -561,7 +703,7 @@ export function RiskObjectDetailsPage() {
                                   <Typography variant="caption" color="text.secondary">
                                     Объект {rowIndex + 1}
                                   </Typography>
-                                  <IconButton size="small" aria-label="Удалить объект из массива" onClick={() => removeArrayRow(field.id, row.id)} disabled={!editingEnabled}>
+                                  <IconButton size="small" aria-label="Удалить объект из массива" onClick={() => removeArrayRow(field.id, row.id)} disabled={!canEdit}>
                                     <DeleteOutlinedIcon fontSize="small" />
                                   </IconButton>
                                 </Box>
@@ -576,21 +718,21 @@ export function RiskObjectDetailsPage() {
                                         fullWidth
                                         sx={{ flex: '1 1 200px', minWidth: 0 }}
                                         autoComplete="off"
-                                        disabled={!editingEnabled}
+                                        disabled={!canEdit}
                                       />
-                                      <IconButton size="small" aria-label="Удалить ключ" onClick={() => removeFieldKeyFromArrayRow(field.id, row.id, fk.id)} sx={{ mt: 0.25 }} disabled={!editingEnabled}>
+                                      <IconButton size="small" aria-label="Удалить ключ" onClick={() => removeFieldKeyFromArrayRow(field.id, row.id, fk.id)} sx={{ mt: 0.25 }} disabled={!canEdit}>
                                         <DeleteOutlinedIcon fontSize="small" />
                                       </IconButton>
                                     </Box>
                                   ))}
                                 </Stack>
-                                <Button size="small" onClick={() => addFieldKeyToArrayRow(field.id, row.id)} sx={{ mt: 1 }} disabled={!editingEnabled}>
+                                <Button size="small" onClick={() => addFieldKeyToArrayRow(field.id, row.id)} sx={{ mt: 1 }} disabled={!canEdit}>
                                   Добавить ключ поля
                                 </Button>
                               </Paper>
                             ))}
                           </Stack>
-                          <Button size="small" variant="outlined" onClick={() => addArrayRow(field.id)} sx={{ mt: 1.5 }} disabled={!editingEnabled}>
+                          <Button size="small" variant="outlined" onClick={() => addArrayRow(field.id)} sx={{ mt: 1.5 }} disabled={!canEdit}>
                             Добавить элемент массива
                           </Button>
                         </Box>

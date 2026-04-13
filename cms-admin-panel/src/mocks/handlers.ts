@@ -8,6 +8,7 @@ const adminUser: AppUser = {
   name: 'Алексей Иванов',
   email: 'admin@trustflow.local',
   role: 'admin',
+  companyId: 'company-trustflow-001',
 }
 
 const mockUsers: Array<{
@@ -187,8 +188,10 @@ function buildMockIntegrationChangeHistory(count: number) {
     const hour = 7 + (i % 12)
     const minute = (i * 11) % 60
     const pad = (n: number) => String(n).padStart(2, '0')
+    const integrationId = mockIntegrationConfigs.find((c) => c.name === t.configName)?.id
     return {
       id: `hist-${i + 1}`,
+      integrationId,
       changedAt: `2026-04-${pad(day)}T${pad(hour)}:${pad(minute)}:00.000Z`,
       configName: t.configName,
       description: `${t.description} (#${i + 1})`,
@@ -200,7 +203,7 @@ function buildMockIntegrationChangeHistory(count: number) {
 /** Достаточно страниц для демонстрации бесконечной прокрутки (по 5 записей). */
 const mockIntegrationChangeHistory = buildMockIntegrationChangeHistory(48)
 
-const mockRiskObjectModels = [
+const mockRiskObjectModelsCatalog = [
   {
     id: 'rom-1',
     name: 'Юридическое лицо',
@@ -242,7 +245,7 @@ const mockRiskObjectModels = [
   },
 ]
 
-let integrationDraftCurrent: Record<string, unknown> | null = null
+const mockRiskObjectModelsList = mockRiskObjectModelsCatalog.map(({ id, name }) => ({ id, name }))
 
 function defaultRiskDefinition(name: string): Record<string, unknown> {
   return {
@@ -258,7 +261,6 @@ let mockRiskObjects = [
     id: 'ro-1',
     code: 'RO-001',
     name: 'ООО «Вектор»',
-    category: 'Контрагент',
     status: 'active' as const,
     updatedAt: '2026-04-12T10:15:00.000Z',
     definition: {
@@ -272,7 +274,6 @@ let mockRiskObjects = [
     id: 'ro-2',
     code: 'RO-002',
     name: 'ИП Соколов',
-    category: 'Контрагент',
     status: 'active' as const,
     updatedAt: '2026-04-11T14:40:00.000Z',
     definition: {
@@ -286,7 +287,6 @@ let mockRiskObjects = [
     id: 'ro-3',
     code: 'RO-003',
     name: 'АО «Трастфлоу Логистик»',
-    category: 'Перевозчик',
     status: 'active' as const,
     updatedAt: '2026-04-10T09:00:00.000Z',
     definition: {
@@ -299,7 +299,6 @@ let mockRiskObjects = [
     id: 'ro-4',
     code: 'RO-004',
     name: 'ПАО «Северный банк»',
-    category: 'Финансовая организация',
     status: 'archived' as const,
     updatedAt: '2026-03-28T16:20:00.000Z',
     definition: {
@@ -312,7 +311,6 @@ let mockRiskObjects = [
     id: 'ro-5',
     code: 'RO-005',
     name: 'ООО «Ромашка»',
-    category: 'Контрагент',
     status: 'active' as const,
     updatedAt: '2026-04-09T11:30:00.000Z',
     definition: {
@@ -325,7 +323,6 @@ let mockRiskObjects = [
     id: 'ro-6',
     code: 'RO-006',
     name: 'ГК «Альфа»',
-    category: 'Группа',
     status: 'active' as const,
     updatedAt: '2026-04-08T08:45:00.000Z',
     definition: {
@@ -371,8 +368,10 @@ function buildMockRiskObjectChangeHistory(count: number) {
     const hour = 8 + (i % 11)
     const minute = (i * 9) % 60
     const pad = (n: number) => String(n).padStart(2, '0')
+    const riskObjectId = mockRiskObjects.find((r) => r.name === t.riskObjectName)?.id
     return {
       id: `roh-${i + 1}`,
+      riskObjectId,
       changedAt: `2026-04-${pad(day)}T${pad(hour)}:${pad(minute)}:00.000Z`,
       riskObjectName: t.riskObjectName,
       description: `${t.description} (#${i + 1})`,
@@ -458,13 +457,78 @@ export const handlers = [
     })
   }),
 
+  http.post('/api/integration-configs', async ({ request }) => {
+    await delay(300)
+    const token = parseAuth(request)
+    if (token !== MOCK_TOKEN) {
+      return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
+    }
+    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>
+    if (
+      typeof body.name !== 'string' ||
+      !body.name.trim() ||
+      (body.integrationKind !== 'pull' &&
+        body.integrationKind !== 'push' &&
+        body.integrationKind !== 'broker') ||
+      typeof body.endpointUrl !== 'string' ||
+      !body.endpointUrl.trim() ||
+      typeof body.riskObjectModelId !== 'string' ||
+      !body.riskObjectModelId.trim()
+    ) {
+      return HttpResponse.json(
+        { message: 'Некорректные данные для создания интеграции' },
+        { status: 400 },
+      )
+    }
+    const id = `ic-${Date.now()}`
+    const number = mockIntegrationConfigs.length + 1
+    const updatedAt = new Date().toISOString()
+    const status = 'active' as const
+    const mappingRules = Array.isArray(body.mapping_rules) ? body.mapping_rules : []
+
+    const listRow = {
+      id,
+      number,
+      name: body.name.trim(),
+      updatedAt,
+      status,
+      authorName: adminUser.name,
+    }
+    mockIntegrationConfigs = [listRow, ...mockIntegrationConfigs]
+
+    mockIntegrationConfigDetails = [
+      {
+        id,
+        number,
+        name: body.name.trim(),
+        integrationKind: body.integrationKind,
+        endpointUrl: body.endpointUrl.trim(),
+        riskObjectModelId: body.riskObjectModelId.trim(),
+        mapping_rules: mappingRules,
+        status,
+        authorName: adminUser.name,
+        updatedAt,
+      },
+      ...mockIntegrationConfigDetails,
+    ]
+
+    return HttpResponse.json({ id, savedAt: updatedAt }, { status: 201 })
+  }),
+
   http.get('/api/integration-configs', async ({ request }) => {
     await delay(320)
     const token = parseAuth(request)
     if (token !== MOCK_TOKEN) {
       return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
     }
-    return HttpResponse.json({ items: mockIntegrationConfigs })
+    const url = new URL(request.url)
+    const page = Math.max(1, Number.parseInt(url.searchParams.get('page') ?? '1', 10) || 1)
+    const rawSize = Number.parseInt(url.searchParams.get('pageSize') ?? '6', 10)
+    const pageSize = Math.min(100, Math.max(1, Number.isFinite(rawSize) ? rawSize : 6))
+    const start = (page - 1) * pageSize
+    const items = mockIntegrationConfigs.slice(start, start + pageSize)
+    const hasMore = start + items.length < mockIntegrationConfigs.length
+    return HttpResponse.json({ items, hasMore })
   }),
 
   http.get('/api/integration-configs/change-history', async ({ request }) => {
@@ -544,10 +608,7 @@ export const handlers = [
       mapping_rules: Array.isArray(body.mapping_rules)
         ? body.mapping_rules
         : prev.mapping_rules,
-      status:
-        body.status === 'active' || body.status === 'inactive'
-          ? body.status
-          : prev.status,
+      status: prev.status,
       authorName: adminUser.name,
       updatedAt,
     }
@@ -566,6 +627,37 @@ export const handlers = [
     return HttpResponse.json({ id, savedAt: updatedAt })
   }),
 
+  http.put('/api/integration-configs/:id/status', async ({ request, params }) => {
+    await delay(220)
+    const token = parseAuth(request)
+    if (token !== MOCK_TOKEN) {
+      return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
+    }
+    const id = String(params.id ?? '')
+    const idx = mockIntegrationConfigDetails.findIndex((it) => it.id === id)
+    if (idx < 0) {
+      return HttpResponse.json({ message: 'Интеграция не найдена' }, { status: 404 })
+    }
+    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>
+    if (body.status !== 'active' && body.status !== 'inactive') {
+      return HttpResponse.json({ message: 'Некорректный статус' }, { status: 400 })
+    }
+    const updatedAt = new Date().toISOString()
+    const nextStatus = body.status
+    mockIntegrationConfigDetails[idx] = {
+      ...mockIntegrationConfigDetails[idx],
+      status: nextStatus,
+      updatedAt,
+      authorName: adminUser.name,
+    }
+    mockIntegrationConfigs = mockIntegrationConfigs.map((it) =>
+      it.id === id
+        ? { ...it, status: nextStatus, updatedAt, authorName: adminUser.name }
+        : it,
+    )
+    return HttpResponse.json({ id, savedAt: updatedAt })
+  }),
+
   http.get('/api/risk-object-models', async ({ request }) => {
     await delay(220)
     const token = parseAuth(request)
@@ -576,7 +668,21 @@ export const handlers = [
     if (url.searchParams.get('empty') === '1') {
       return HttpResponse.json({ items: [] as { id: string; name: string }[] })
     }
-    return HttpResponse.json({ items: mockRiskObjectModels })
+    return HttpResponse.json({ items: mockRiskObjectModelsList })
+  }),
+
+  http.get('/api/risk-object-models/:modelId', async ({ request, params }) => {
+    await delay(200)
+    const token = parseAuth(request)
+    if (token !== MOCK_TOKEN) {
+      return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
+    }
+    const modelId = String(params.modelId ?? '')
+    const row = mockRiskObjectModelsCatalog.find((m) => m.id === modelId)
+    if (!row) {
+      return HttpResponse.json({ message: 'Модель не найдена' }, { status: 404 })
+    }
+    return HttpResponse.json({ id: row.id, name: row.name, definition: row.definition })
   }),
 
   http.post('/api/risk-objects', async ({ request }) => {
@@ -598,7 +704,6 @@ export const handlers = [
       id,
       code,
       name,
-      category: 'Конструктор',
       status: 'active' as const,
       updatedAt: new Date().toISOString(),
       definition:
@@ -619,7 +724,14 @@ export const handlers = [
     if (token !== MOCK_TOKEN) {
       return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
     }
-    return HttpResponse.json({ items: mockRiskObjects })
+    const url = new URL(request.url)
+    const page = Math.max(1, Number.parseInt(url.searchParams.get('page') ?? '1', 10) || 1)
+    const rawSize = Number.parseInt(url.searchParams.get('pageSize') ?? '6', 10)
+    const pageSize = Math.min(100, Math.max(1, Number.isFinite(rawSize) ? rawSize : 6))
+    const start = (page - 1) * pageSize
+    const items = mockRiskObjects.slice(start, start + pageSize)
+    const hasMore = start + items.length < mockRiskObjects.length
+    return HttpResponse.json({ items, hasMore })
   }),
 
   http.get('/api/risk-objects/change-history', async ({ request }) => {
@@ -648,6 +760,26 @@ export const handlers = [
     const items = pool.slice(start, start + pageSize)
     const hasMore = start + items.length < pool.length
     return HttpResponse.json({ items, hasMore })
+  }),
+
+  http.get('/api/risk-objects/change-history/:historyId', async ({ request, params }) => {
+    await delay(230)
+    const token = parseAuth(request)
+    if (token !== MOCK_TOKEN) {
+      return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
+    }
+    const historyId = String(params.historyId ?? '')
+    const entry = mockRiskObjectChangeHistory.find((row) => row.id === historyId)
+    if (!entry) {
+      return HttpResponse.json({ message: 'Запись истории не найдена' }, { status: 404 })
+    }
+    if (!entry.riskObjectId) {
+      return HttpResponse.json(
+        { message: 'Для записи истории не найден связанный рисковый объект' },
+        { status: 404 },
+      )
+    }
+    return HttpResponse.json(entry)
   }),
 
   http.get('/api/risk-objects/:id', async ({ request, params }) => {
@@ -705,24 +837,35 @@ export const handlers = [
     return HttpResponse.json({ id, savedAt: updatedAt })
   }),
 
-  http.put('/api/integration-drafts/current', async ({ request }) => {
-    await delay(240)
+  http.put('/api/risk-objects/:id/status', async ({ request, params }) => {
+    await delay(220)
     const token = parseAuth(request)
     if (token !== MOCK_TOKEN) {
       return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
     }
-    const body = (await request.json()) as Record<string, unknown>
+    const id = String(params.id ?? '')
+    const idx = mockRiskObjects.findIndex((r) => r.id === id)
+    if (idx < 0) {
+      return HttpResponse.json({ message: 'Объект не найден' }, { status: 404 })
+    }
+    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>
+    const statusRaw = body.status
+    if (
+      statusRaw !== 'active' &&
+      statusRaw !== 'archived' &&
+      statusRaw !== 'inactive' &&
+      statusRaw !== 'disable'
+    ) {
+      return HttpResponse.json({ message: 'Некорректный статус' }, { status: 400 })
+    }
+    const nextStatus = statusRaw === 'active' ? 'active' : 'archived'
     const updatedAt = new Date().toISOString()
-    integrationDraftCurrent = {
-      ...integrationDraftCurrent,
-      ...body,
+    mockRiskObjects[idx] = {
+      ...mockRiskObjects[idx],
+      status: nextStatus,
       updatedAt,
     }
-    return HttpResponse.json({
-      id: 'draft-current',
-      updatedAt,
-      ...integrationDraftCurrent,
-    })
+    return HttpResponse.json({ id, savedAt: updatedAt })
   }),
 
   http.put('/api/settings', async ({ request }) => {

@@ -3,4 +3,5 @@ export type AppUser = {
   name: string
   email: string
   role: string
+  companyId: string
 }

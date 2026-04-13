@@ -35,14 +35,18 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, SyntheticEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getRiskObjectModels, putIntegrationDraftCurrent } from '../api/client'
+import {
+  getRiskObjectModelById,
+  getRiskObjectModels,
+  postIntegrationConfigCreate,
+} from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import type {
-  IntegrationDraftPayload,
   IntegrationKind,
   IntegrationMappingRule,
-  RiskObjectModel,
+  RiskObjectModelListItem,
 } from '../types/integrationDraft'
+import type { IntegrationUpdatePayload } from '../types/integration'
 
 function newId() {
   return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`
@@ -100,26 +104,13 @@ function buildMappingRules(rows: MappingRow[]): IntegrationMappingRule[] {
     })
 }
 
-function hasDraftContent(payload: IntegrationDraftPayload) {
-  const hasMapping = payload.mapping_rules.some(
-    (r) => r.from.trim() !== '' && r.to.trim() !== '',
-  )
-  return (
-    payload.name.trim().length > 0 ||
-    payload.endpointUrl.trim().length > 0 ||
-    payload.riskObjectModelId.trim().length > 0 ||
-    payload.integrationKind !== '' ||
-    hasMapping
-  )
-}
-
 function buildPayload(
   name: string,
   integrationKind: IntegrationKind | '',
   endpointUrl: string,
   riskObjectModelId: string,
   mappingRows: MappingRow[],
-): IntegrationDraftPayload {
+): Omit<IntegrationUpdatePayload, 'integrationKind'> & { integrationKind: IntegrationKind | '' } {
   return {
     name,
     integrationKind,
@@ -187,7 +178,11 @@ function parseIntegrationImport(
   const name = typeof obj.name === 'string' ? obj.name : ''
   const endpointUrl = typeof obj.endpointUrl === 'string' ? obj.endpointUrl : ''
   const riskObjectModelId =
-    typeof obj.riskObjectModelId === 'string' ? obj.riskObjectModelId : ''
+    typeof obj.riskObjectModelId === 'string'
+      ? obj.riskObjectModelId
+      : typeof obj.riskObjectId === 'string'
+        ? obj.riskObjectId
+        : ''
 
   let integrationKind: IntegrationKind | '' = ''
   const rawKind = obj.integrationKind
@@ -218,13 +213,13 @@ export function IntegrationCreatePage() {
 
   const [mappingRows, setMappingRows] = useState<MappingRow[]>([])
 
-  const [riskModels, setRiskModels] = useState<RiskObjectModel[]>([])
+  const [riskModels, setRiskModels] = useState<RiskObjectModelListItem[]>([])
   const [riskModelsLoading, setRiskModelsLoading] = useState(true)
   const [riskModelsError, setRiskModelsError] = useState<string | null>(null)
-
-  const [draftStatus, setDraftStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
-  const [draftError, setDraftError] = useState<string | null>(null)
-  const draftStatusClearRef = useRef<number | undefined>(undefined)
+  const [modelDefinition, setModelDefinition] = useState<Record<string, unknown> | null>(null)
+  const [modelDefinitionLoading, setModelDefinitionLoading] = useState(false)
+  const [modelDefinitionError, setModelDefinitionError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [clearDialogOpen, setClearDialogOpen] = useState(false)
@@ -249,17 +244,9 @@ export function IntegrationCreatePage() {
     setToast(null)
   }, [])
 
-  const selectedModel = useMemo(
-    () => riskModels.find((m) => m.id === riskObjectModelId),
-    [riskModels, riskObjectModelId],
-  )
-
   const targetPaths = useMemo(
-    () =>
-      selectedModel?.definition
-        ? flattenTargetPaths(selectedModel.definition)
-        : [],
-    [selectedModel],
+    () => (modelDefinition ? flattenTargetPaths(modelDefinition) : []),
+    [modelDefinition],
   )
 
   const mappingPreviewJson = useMemo(() => {
@@ -291,21 +278,47 @@ export function IntegrationCreatePage() {
   }, [loadRiskModels])
 
   useEffect(() => {
+    if (!token || !riskObjectModelId) {
+      setModelDefinition(null)
+      setModelDefinitionLoading(false)
+      setModelDefinitionError(null)
+      return
+    }
+    let cancelled = false
+    setModelDefinitionLoading(true)
+    setModelDefinitionError(null)
+    getRiskObjectModelById(token, riskObjectModelId)
+      .then((model) => {
+        if (!cancelled) setModelDefinition(model.definition)
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) {
+          setModelDefinition(null)
+          setModelDefinitionError(e instanceof Error ? e.message : 'Не удалось загрузить структуру модели')
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setModelDefinitionLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [token, riskObjectModelId])
+
+  useEffect(() => {
     if (!riskObjectModelId) {
       setMappingRows([])
       return
     }
     setMappingRows((prev) => {
       if (prev.length === 0) return [createEmptyMappingRow()]
-      const paths = selectedModel?.definition
-        ? flattenTargetPaths(selectedModel.definition)
-        : []
+      const paths = modelDefinition ? flattenTargetPaths(modelDefinition) : []
       return prev.map((row) => ({
         ...row,
         to: paths.length === 0 || paths.includes(row.to) ? row.to : '',
       }))
     })
-  }, [riskObjectModelId, selectedModel])
+  }, [riskObjectModelId, modelDefinition])
 
   const addMappingRow = useCallback(() => {
     setMappingRows((prev) => [...prev, createEmptyMappingRow()])
@@ -324,53 +337,6 @@ export function IntegrationCreatePage() {
     )
   }, [])
 
-  const persistDraft = useCallback(async (): Promise<boolean> => {
-    if (!token) return false
-    const payload = buildPayload(
-      name,
-      integrationKind,
-      endpointUrl,
-      riskObjectModelId,
-      mappingRows,
-    )
-    if (!hasDraftContent(payload)) return false
-    setDraftStatus('saving')
-    setDraftError(null)
-    try {
-      await putIntegrationDraftCurrent(token, payload)
-      setDraftStatus('saved')
-      window.clearTimeout(draftStatusClearRef.current)
-      draftStatusClearRef.current = window.setTimeout(() => {
-        setDraftStatus((s) => (s === 'saved' ? 'idle' : s))
-      }, 4000)
-      return true
-    } catch (e: unknown) {
-      setDraftStatus('error')
-      setDraftError(e instanceof Error ? e.message : 'Ошибка сохранения')
-      return false
-    }
-  }, [token, name, integrationKind, endpointUrl, riskObjectModelId, mappingRows])
-
-  useEffect(() => {
-    if (!token) return
-    const payload = buildPayload(
-      name,
-      integrationKind,
-      endpointUrl,
-      riskObjectModelId,
-      mappingRows,
-    )
-    if (!hasDraftContent(payload)) {
-      setDraftStatus('idle')
-      setDraftError(null)
-      return
-    }
-    const t = window.setTimeout(() => {
-      void persistDraft()
-    }, 600)
-    return () => window.clearTimeout(t)
-  }, [token, name, integrationKind, endpointUrl, riskObjectModelId, mappingRows, persistDraft])
-
   const handleToolbarSave = useCallback(async () => {
     if (!token) {
       showToast({ severity: 'error', text: 'Нет сессии — войдите снова.' })
@@ -383,20 +349,35 @@ export function IntegrationCreatePage() {
       riskObjectModelId,
       mappingRows,
     )
-    if (!hasDraftContent(payload)) {
+    if (
+      payload.name.trim() === '' ||
+      payload.integrationKind === '' ||
+      payload.endpointUrl.trim() === '' ||
+      payload.riskObjectModelId.trim() === ''
+    ) {
       showToast({
         severity: 'error',
-        text: 'Нечего сохранять — заполните поля формы.',
+        text: 'Заполните обязательные поля: название, вид, URL и модель рискового объекта.',
       })
       return
     }
-    const ok = await persistDraft()
-    if (ok) {
-      showToast({ severity: 'success', text: 'Черновик сохранён на сервере.' })
-    } else {
-      showToast({ severity: 'error', text: 'Не удалось сохранить черновик.' })
+    setSaving(true)
+    try {
+      await postIntegrationConfigCreate(token, {
+        ...payload,
+        integrationKind: payload.integrationKind,
+      })
+      showToast({ severity: 'success', text: 'Интеграция создана.' })
+      navigate('/app/integration')
+    } catch (e: unknown) {
+      showToast({
+        severity: 'error',
+        text: e instanceof Error ? e.message : 'Не удалось создать интеграцию.',
+      })
+    } finally {
+      setSaving(false)
     }
-  }, [token, name, integrationKind, endpointUrl, riskObjectModelId, mappingRows, persistDraft, showToast])
+  }, [token, name, integrationKind, endpointUrl, riskObjectModelId, mappingRows, showToast, navigate])
 
   const handleExport = useCallback(() => {
     const payload = buildPayload(
@@ -416,9 +397,9 @@ export function IntegrationCreatePage() {
     setEndpointUrl('')
     setRiskObjectModelId('')
     setMappingRows([])
+    setModelDefinition(null)
+    setModelDefinitionError(null)
     setClearDialogOpen(false)
-    setDraftStatus('idle')
-    setDraftError(null)
     showToast({ severity: 'success', text: 'Форма очищена.' })
   }, [showToast])
 
@@ -450,10 +431,6 @@ export function IntegrationCreatePage() {
     },
     [showToast],
   )
-
-  useEffect(() => {
-    return () => window.clearTimeout(draftStatusClearRef.current)
-  }, [])
 
   return (
     <Box>
@@ -492,7 +469,7 @@ export function IntegrationCreatePage() {
             variant="contained"
             startIcon={<SaveOutlinedIcon />}
             onClick={() => void handleToolbarSave()}
-            disabled={!token || draftStatus === 'saving'}
+            disabled={!token || saving}
           >
             Сохранить
           </Button>
@@ -527,7 +504,7 @@ export function IntegrationCreatePage() {
         <DialogTitle>Очистить форму?</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            Будут сброшены название, вид интеграции, URL, модель рискового объекта и все
+            Будут сброшены название, вид интеграции, URL, выбранная модель и все
             правила сопоставления.
           </DialogContentText>
         </DialogContent>
@@ -597,11 +574,11 @@ export function IntegrationCreatePage() {
             disabled={riskModelsLoading || riskModels.length === 0}
             error={Boolean(riskModelsError)}
           >
-            <FormLabel id="risk-model-label" sx={{ mb: 0.75, display: 'block' }}>
-              Выбрать модель рискового объекта
+            <FormLabel id="risk-object-model-label" sx={{ mb: 0.75, display: 'block' }}>
+              Модель рискового объекта
             </FormLabel>
             <Select
-              aria-labelledby="risk-model-label"
+              aria-labelledby="risk-object-model-label"
               value={riskObjectModelId}
               onChange={(e) => setRiskObjectModelId(e.target.value as string)}
               displayEmpty
@@ -615,7 +592,8 @@ export function IntegrationCreatePage() {
                     </Typography>
                   )
                 }
-                return riskModels.find((m) => m.id === selected)?.name ?? selected
+                const m = riskModels.find((x) => x.id === selected)
+                return m ? m.name : selected
               }}
             >
               {riskModels.map((m) => (
@@ -648,6 +626,19 @@ export function IntegrationCreatePage() {
                 </Box>
                 , если заполнено.
               </Typography>
+              {modelDefinitionLoading ? (
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+                  <CircularProgress size={18} />
+                  <Typography variant="body2" color="text.secondary">
+                    Загрузка структуры модели…
+                  </Typography>
+                </Box>
+              ) : null}
+              {modelDefinitionError ? (
+                <Alert severity="error" sx={{ mb: 2 }}>
+                  {modelDefinitionError}
+                </Alert>
+              ) : null}
 
               <Stack spacing={2}>
                 {mappingRows.map((row, index) => (
@@ -681,7 +672,17 @@ export function IntegrationCreatePage() {
                         placeholder="Имя поля источника"
                         autoComplete="off"
                       />
-                      {targetPaths.length > 0 ? (
+                      {modelDefinitionLoading ? (
+                        <TextField
+                          label="Преобразовать в"
+                          value=""
+                          fullWidth
+                          size="small"
+                          disabled
+                          placeholder="Загрузка схемы…"
+                          autoComplete="off"
+                        />
+                      ) : targetPaths.length > 0 ? (
                         <FormControl fullWidth size="small">
                           <FormLabel
                             id={`map-to-${row.id}`}
@@ -714,8 +715,14 @@ export function IntegrationCreatePage() {
                           onChange={(e) => patchMappingRow(row.id, { to: e.target.value })}
                           fullWidth
                           size="small"
-                          placeholder="У модели нет схемы — введите путь вручную"
-                          helperText="Сервер не вернул definition для этой модели."
+                          placeholder="Введите путь вручную"
+                          helperText={
+                            modelDefinitionError
+                              ? undefined
+                              : modelDefinition
+                                ? 'В схеме нет распознанных путей — введите вручную.'
+                                : 'Структура объекта не загружена.'
+                          }
                           autoComplete="off"
                         />
                       )}
@@ -746,23 +753,13 @@ export function IntegrationCreatePage() {
           ) : null}
 
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, minHeight: 28 }}>
-            {draftStatus === 'saving' ? (
+            {saving ? (
               <>
                 <CircularProgress size={18} />
                 <Typography variant="body2" color="text.secondary">
-                  Сохранение черновика…
+                  Создание интеграции…
                 </Typography>
               </>
-            ) : null}
-            {draftStatus === 'saved' ? (
-              <Typography variant="body2" color="success.main">
-                Черновик сохранён на сервере
-              </Typography>
-            ) : null}
-            {draftStatus === 'error' ? (
-              <Typography variant="body2" color="error">
-                {draftError ?? 'Не удалось сохранить черновик'}
-              </Typography>
             ) : null}
           </Box>
         </Stack>
@@ -788,7 +785,7 @@ export function IntegrationCreatePage() {
               Итоговый JSON
             </Typography>
             <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block' }}>
-              В черновик также уходят название, URL, вид и модель. Здесь — только блок{' '}
+              При создании также отправляются название, URL, вид и модель рискового объекта. Здесь — только блок{' '}
               <Box component="span" sx={{ fontFamily: 'monospace' }}>
                 mapping_rules
               </Box>

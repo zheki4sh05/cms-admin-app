@@ -1,6 +1,7 @@
 import AddIcon from '@mui/icons-material/Add'
+import ChevronLeftIcon from '@mui/icons-material/ChevronLeft'
+import ChevronRightIcon from '@mui/icons-material/ChevronRight'
 import ClearIcon from '@mui/icons-material/Clear'
-import FilterListIcon from '@mui/icons-material/FilterList'
 import SearchIcon from '@mui/icons-material/Search'
 import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined'
 import {
@@ -10,7 +11,6 @@ import {
   Chip,
   CircularProgress,
   Divider,
-  Drawer,
   IconButton,
   InputAdornment,
   List,
@@ -28,9 +28,13 @@ import {
   Toolbar,
   Typography,
 } from '@mui/material'
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getRiskObjects, getRiskObjectsChangeHistory } from '../api/client'
+import {
+  getRiskObjectChangeHistoryById,
+  getRiskObjects,
+  getRiskObjectsChangeHistory,
+} from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import type { RiskObject, RiskObjectHistoryEntry } from '../types/riskObjects'
 
@@ -51,7 +55,10 @@ function formatDateTime(iso: string) {
 export function RiskObjectsPage() {
   const navigate = useNavigate()
   const { token } = useAuth()
+  const LIST_PAGE_SIZE = 6
   const [rows, setRows] = useState<RiskObject[]>([])
+  const [listPage, setListPage] = useState(1)
+  const [listHasMore, setListHasMore] = useState(false)
   const [listError, setListError] = useState<string | null>(null)
   const [listLoading, setListLoading] = useState(true)
 
@@ -60,20 +67,14 @@ export function RiskObjectsPage() {
   const [historyError, setHistoryError] = useState<string | null>(null)
   const [historyInitialLoading, setHistoryInitialLoading] = useState(true)
   const [historyLoadingMore, setHistoryLoadingMore] = useState(false)
+  const [historyOpeningId, setHistoryOpeningId] = useState<string | null>(null)
   const [historySearchInput, setHistorySearchInput] = useState('')
   const [historySearchDebounced, setHistorySearchDebounced] = useState('')
-  const [historyFilters, setHistoryFilters] = useState<Record<string, string>>({})
-  const [historyFiltersOpen, setHistoryFiltersOpen] = useState(false)
 
   const historyScrollRef = useRef<HTMLDivElement | null>(null)
   const historySentinelRef = useRef<HTMLDivElement | null>(null)
   const historyLastPageRef = useRef(0)
   const fetchingHistoryRef = useRef(false)
-
-  const historyFiltersKey = useMemo(
-    () => JSON.stringify(historyFilters),
-    [historyFilters],
-  )
 
   useEffect(() => {
     const t = window.setTimeout(() => {
@@ -84,12 +85,20 @@ export function RiskObjectsPage() {
 
   useEffect(() => {
     if (!token) return
+    setListPage(1)
+  }, [token])
+
+  useEffect(() => {
+    if (!token) return
     let cancelled = false
     setListLoading(true)
     setListError(null)
-    getRiskObjects(token)
-      .then((items) => {
-        if (!cancelled) setRows(items)
+    getRiskObjects(token, listPage, LIST_PAGE_SIZE)
+      .then(({ items, hasMore }) => {
+        if (!cancelled) {
+          setRows(items)
+          setListHasMore(hasMore)
+        }
       })
       .catch((e: unknown) => {
         if (!cancelled) {
@@ -102,7 +111,7 @@ export function RiskObjectsPage() {
     return () => {
       cancelled = true
     }
-  }, [token])
+  }, [token, listPage])
 
   const fetchHistoryPage = useCallback(
     async (page: number, append: boolean) => {
@@ -112,10 +121,8 @@ export function RiskObjectsPage() {
       else setHistoryInitialLoading(true)
       setHistoryError(null)
       try {
-        const hasFilterParams = Object.values(historyFilters).some(Boolean)
         const { items, hasMore } = await getRiskObjectsChangeHistory(token, page, 5, {
           q: historySearchDebounced || undefined,
-          filters: hasFilterParams ? historyFilters : undefined,
         })
         setHistoryItems((prev) => (append ? [...prev, ...items] : items))
         setHistoryHasMore(hasMore)
@@ -128,7 +135,7 @@ export function RiskObjectsPage() {
         setHistoryInitialLoading(false)
       }
     },
-    [token, historySearchDebounced, historyFilters],
+    [token, historySearchDebounced],
   )
 
   useEffect(() => {
@@ -137,7 +144,7 @@ export function RiskObjectsPage() {
     setHistoryItems([])
     setHistoryHasMore(true)
     void fetchHistoryPage(1, false)
-  }, [token, historySearchDebounced, historyFiltersKey, fetchHistoryPage])
+  }, [token, historySearchDebounced, fetchHistoryPage])
 
   useLayoutEffect(() => {
     if (!token || historyInitialLoading) return
@@ -162,9 +169,27 @@ export function RiskObjectsPage() {
     historyInitialLoading,
     historyItems.length,
     historySearchDebounced,
-    historyFiltersKey,
     fetchHistoryPage,
   ])
+
+  const handleHistoryView = useCallback(
+    async (historyId: string) => {
+      if (!token) return
+      setHistoryOpeningId(historyId)
+      setHistoryError(null)
+      try {
+        const details = await getRiskObjectChangeHistoryById(token, historyId)
+        navigate(`/app/risk-objects/${details.riskObjectId}?readonly=1`)
+      } catch (e: unknown) {
+        setHistoryError(
+          e instanceof Error ? e.message : 'Не удалось открыть запись истории изменений',
+        )
+      } finally {
+        setHistoryOpeningId(null)
+      }
+    },
+    [token, navigate],
+  )
 
   return (
     <Box>
@@ -226,7 +251,7 @@ export function RiskObjectsPage() {
                     <TableCell>
                       <Chip
                         size="small"
-                        label={row.status === 'active' ? 'Активен' : 'В архиве'}
+                        label={row.status === 'active' ? 'Активен' : 'Отключен'}
                         color={row.status === 'active' ? 'success' : 'default'}
                         variant={row.status === 'active' ? 'filled' : 'outlined'}
                       />
@@ -247,6 +272,35 @@ export function RiskObjectsPage() {
           </TableBody>
         </Table>
       </TableContainer>
+      <Box
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'flex-end',
+          gap: 1,
+          mb: 4,
+        }}
+      >
+        <Typography variant="body2" color="text.secondary" sx={{ mr: 0.5 }}>
+          Страница {listPage}
+        </Typography>
+        <IconButton
+          size="small"
+          aria-label="Предыдущая страница"
+          onClick={() => setListPage((p) => Math.max(1, p - 1))}
+          disabled={listLoading || listPage <= 1}
+        >
+          <ChevronLeftIcon fontSize="small" />
+        </IconButton>
+        <IconButton
+          size="small"
+          aria-label="Следующая страница"
+          onClick={() => setListPage((p) => p + 1)}
+          disabled={listLoading || !listHasMore}
+        >
+          <ChevronRightIcon fontSize="small" />
+        </IconButton>
+      </Box>
 
       <Typography variant="h6" component="h2" sx={{ mb: 2 }}>
         История изменений
@@ -283,48 +337,8 @@ export function RiskObjectsPage() {
               ) : null,
             }}
           />
-          <Button
-            variant="outlined"
-            size="medium"
-            startIcon={<FilterListIcon />}
-            onClick={() => setHistoryFiltersOpen(true)}
-            sx={{ flexShrink: 0 }}
-          >
-            Фильтры
-          </Button>
         </Toolbar>
       </Paper>
-
-      <Drawer
-        anchor="right"
-        open={historyFiltersOpen}
-        onClose={() => setHistoryFiltersOpen(false)}
-        PaperProps={{ sx: { width: { xs: '100%', sm: 360 }, p: 0 } }}
-      >
-        <Box sx={{ p: 2 }}>
-          <Typography variant="h6" sx={{ mb: 1 }}>
-            Фильтры
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Поля фильтрации вы уточните позже. После этого здесь появятся конкретные
-            контролы, а их значения отправятся в историю как query-параметры вместе с
-            <code>page</code>, <code>pageSize</code> и <code>q</code>.
-          </Typography>
-          <Button
-            variant="outlined"
-            sx={{ mr: 1 }}
-            onClick={() => {
-              setHistoryFilters({})
-              setHistoryFiltersOpen(false)
-            }}
-          >
-            Сбросить
-          </Button>
-          <Button variant="contained" onClick={() => setHistoryFiltersOpen(false)}>
-            Закрыть
-          </Button>
-        </Box>
-      </Drawer>
 
       {historyError ? (
         <Alert severity="error" sx={{ mb: 2 }}>
@@ -352,7 +366,7 @@ export function RiskObjectsPage() {
             {!historyInitialLoading && historyItems.length === 0 ? (
               <Box sx={{ py: 5, px: 2, textAlign: 'center' }}>
                 <Typography color="text.secondary">
-                  Ничего не найдено. Попробуйте другой запрос или снимите фильтры.
+                  Ничего не найдено. Попробуйте другой запрос.
                 </Typography>
               </Box>
             ) : (
@@ -360,7 +374,10 @@ export function RiskObjectsPage() {
                 {historyItems.map((entry, index) => (
                   <Box key={entry.id}>
                     {index > 0 ? <Divider component="li" /> : null}
-                    <ListItem alignItems="flex-start" sx={{ py: 1.5, px: 2 }}>
+                    <ListItem
+                      alignItems="flex-start"
+                      sx={{ py: 1.5, px: 2, gap: 1.5, justifyContent: 'space-between' }}
+                    >
                       <ListItemText
                         primaryTypographyProps={{ variant: 'subtitle2', fontWeight: 600 }}
                         primary={entry.riskObjectName}
@@ -385,6 +402,15 @@ export function RiskObjectsPage() {
                           </>
                         }
                       />
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        startIcon={<VisibilityOutlinedIcon fontSize="small" />}
+                        onClick={() => void handleHistoryView(entry.id)}
+                        disabled={historyOpeningId === entry.id}
+                      >
+                        Просмотреть
+                      </Button>
                     </ListItem>
                   </Box>
                 ))}

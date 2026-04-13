@@ -15,6 +15,7 @@ import {
   DialogTitle,
   FormControl,
   FormControlLabel,
+  FormHelperText,
   FormLabel,
   IconButton,
   MenuItem,
@@ -32,19 +33,22 @@ import {
 } from '@mui/material'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { SyntheticEvent } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   getIntegrationConfigById,
+  getRiskObjectModelById,
   getRiskObjectModels,
   putIntegrationConfigById,
+  putIntegrationConfigStatusById,
 } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import type {
   IntegrationDetails,
   IntegrationMappingRule,
+  IntegrationStatusUpdatePayload,
   IntegrationUpdatePayload,
 } from '../types/integration'
-import type { RiskObjectModel } from '../types/integrationDraft'
+import type { RiskObjectModelListItem } from '../types/integrationDraft'
 
 function newId() {
   return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`
@@ -130,13 +134,17 @@ function downloadJsonFile(filename: string, jsonText: string) {
 export function IntegrationDetailsPage() {
   const navigate = useNavigate()
   const { id = '' } = useParams()
+  const [searchParams] = useSearchParams()
   const { token } = useAuth()
+  const isReadOnlyView = searchParams.get('readonly') === '1'
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [editingEnabled, setEditingEnabled] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [statusUpdating, setStatusUpdating] = useState(false)
   const [clearDialogOpen, setClearDialogOpen] = useState(false)
+  const canEdit = editingEnabled && !isReadOnlyView
 
   const [number, setNumber] = useState(0)
   const [authorName, setAuthorName] = useState('')
@@ -149,8 +157,12 @@ export function IntegrationDetailsPage() {
   const [mappingRows, setMappingRows] = useState<MappingRow[]>([{ id: newId(), from: '', to: '', applyJs: '' }])
   const [initialSnapshot, setInitialSnapshot] = useState<EditorSnapshot | null>(null)
 
-  const [riskModels, setRiskModels] = useState<RiskObjectModel[]>([])
+  const [riskModels, setRiskModels] = useState<RiskObjectModelListItem[]>([])
+  const [riskModelsLoading, setRiskModelsLoading] = useState(true)
   const [riskModelsError, setRiskModelsError] = useState<string | null>(null)
+  const [modelDefinition, setModelDefinition] = useState<Record<string, unknown> | null>(null)
+  const [modelDefinitionLoading, setModelDefinitionLoading] = useState(false)
+  const [modelDefinitionError, setModelDefinitionError] = useState<string | null>(null)
 
   type OperationToast = { severity: 'success' | 'error'; text: string }
   const [toast, setToast] = useState<OperationToast | null>(null)
@@ -167,13 +179,9 @@ export function IntegrationDetailsPage() {
   )
   const handleToastExited = useCallback(() => setToast(null), [])
 
-  const selectedModel = useMemo(
-    () => riskModels.find((m) => m.id === riskObjectModelId),
-    [riskModels, riskObjectModelId],
-  )
   const targetPaths = useMemo(
-    () => (selectedModel?.definition ? flattenTargetPaths(selectedModel.definition) : []),
-    [selectedModel],
+    () => (modelDefinition ? flattenTargetPaths(modelDefinition) : []),
+    [modelDefinition],
   )
 
   const previewJson = useMemo(() => {
@@ -198,10 +206,13 @@ export function IntegrationDetailsPage() {
     let cancelled = false
     setLoading(true)
     setError(null)
+    setRiskModelsLoading(true)
+    setRiskModelsError(null)
     Promise.all([getIntegrationConfigById(token, id), getRiskObjectModels(token)])
       .then(([details, models]) => {
         if (cancelled) return
         setRiskModels(models)
+        setRiskModelsError(null)
         setNumber(details.number)
         setAuthorName(details.authorName)
         setUpdatedAt(details.updatedAt)
@@ -223,15 +234,49 @@ export function IntegrationDetailsPage() {
         setEditingEnabled(false)
       })
       .catch((e: unknown) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : 'Ошибка загрузки интеграции')
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : 'Ошибка загрузки интеграции')
+          setRiskModelsError(e instanceof Error ? e.message : 'Ошибка загрузки списка моделей')
+        }
       })
       .finally(() => {
-        if (!cancelled) setLoading(false)
+        if (!cancelled) {
+          setLoading(false)
+          setRiskModelsLoading(false)
+        }
       })
     return () => {
       cancelled = true
     }
   }, [token, id])
+
+  useEffect(() => {
+    if (!token || !riskObjectModelId) {
+      setModelDefinition(null)
+      setModelDefinitionLoading(false)
+      setModelDefinitionError(null)
+      return
+    }
+    let cancelled = false
+    setModelDefinitionLoading(true)
+    setModelDefinitionError(null)
+    getRiskObjectModelById(token, riskObjectModelId)
+      .then((model) => {
+        if (!cancelled) setModelDefinition(model.definition)
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) {
+          setModelDefinition(null)
+          setModelDefinitionError(e instanceof Error ? e.message : 'Не удалось загрузить структуру модели')
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setModelDefinitionLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [token, riskObjectModelId])
 
   const patchMappingRow = useCallback((rowId: string, patch: Partial<MappingRow>) => {
     setMappingRows((prev) => prev.map((r) => (r.id === rowId ? { ...r, ...patch } : r)))
@@ -265,6 +310,7 @@ export function IntegrationDetailsPage() {
   }, [initialSnapshot, setFromSnapshot, showToast])
 
   const handleSave = useCallback(async () => {
+    if (isReadOnlyView) return
     if (!token || !id) {
       showToast({ severity: 'error', text: 'Нет сессии — войдите снова.' })
       return
@@ -276,7 +322,6 @@ export function IntegrationDetailsPage() {
       endpointUrl: endpointUrl.trim(),
       riskObjectModelId: riskObjectModelId.trim(),
       mapping_rules: toRules(mappingRows),
-      status,
     }
     try {
       const res = await putIntegrationConfigById(token, id, payload)
@@ -287,7 +332,7 @@ export function IntegrationDetailsPage() {
         integrationKind: payload.integrationKind,
         endpointUrl: payload.endpointUrl,
         riskObjectModelId: payload.riskObjectModelId,
-        status: payload.status,
+        status,
         mappingRows,
       }
       setInitialSnapshot(snapshot)
@@ -301,7 +346,59 @@ export function IntegrationDetailsPage() {
     } finally {
       setSaving(false)
     }
-  }, [token, id, name, integrationKind, endpointUrl, riskObjectModelId, mappingRows, status, showToast])
+  }, [
+    isReadOnlyView,
+    token,
+    id,
+    name,
+    integrationKind,
+    endpointUrl,
+    riskObjectModelId,
+    mappingRows,
+    status,
+    showToast,
+  ])
+
+  const handleStatusSwitch = useCallback(
+    async (checked: boolean) => {
+      if (isReadOnlyView) return
+      if (!token || !id) {
+        showToast({ severity: 'error', text: 'Нет сессии — войдите снова.' })
+        return
+      }
+      const prevStatus = status
+      const nextStatus: IntegrationDetails['status'] = checked ? 'active' : 'inactive'
+      setStatus(nextStatus)
+      setStatusUpdating(true)
+      try {
+        const payload: IntegrationStatusUpdatePayload = { status: nextStatus }
+        const result = await putIntegrationConfigStatusById(token, id, payload)
+        setUpdatedAt(result.savedAt)
+        setAuthorName('Алексей Иванов')
+        setInitialSnapshot((prev) =>
+          prev
+            ? {
+                ...prev,
+                status: nextStatus,
+              }
+            : prev,
+        )
+        showToast({
+          severity: 'success',
+          text: nextStatus === 'active' ? 'Статус: Active.' : 'Статус: Disable.',
+        })
+      } catch (e: unknown) {
+        setStatus(prevStatus)
+        showToast({
+          severity: 'error',
+          text: e instanceof Error ? e.message : 'Не удалось обновить статус интеграции',
+        })
+      } finally {
+        setStatusUpdating(false)
+      }
+    },
+    [isReadOnlyView, token, id, status, showToast],
+  )
 
   const handleExport = useCallback(() => {
     const payload: IntegrationUpdatePayload = {
@@ -310,11 +407,10 @@ export function IntegrationDetailsPage() {
       endpointUrl,
       riskObjectModelId,
       mapping_rules: toRules(mappingRows),
-      status,
     }
     downloadJsonFile(exportFilename(name), JSON.stringify(payload, null, 2))
     showToast({ severity: 'success', text: 'Экспорт выполнен.' })
-  }, [name, integrationKind, endpointUrl, riskObjectModelId, mappingRows, status, showToast])
+  }, [name, integrationKind, endpointUrl, riskObjectModelId, mappingRows, showToast])
 
   if (loading) {
     return (
@@ -355,23 +451,29 @@ export function IntegrationDetailsPage() {
           Просмотр интеграции
         </Typography>
         <Stack direction="row" flexWrap="wrap" sx={{ gap: 1, alignItems: 'center' }}>
-          <Button size="small" variant="contained" startIcon={<SaveOutlinedIcon />} onClick={() => void handleSave()} disabled={!editingEnabled || saving}>
+          <Button size="small" variant="contained" startIcon={<SaveOutlinedIcon />} onClick={() => void handleSave()} disabled={!canEdit || saving}>
             Сохранить
           </Button>
           <Button size="small" variant="outlined" startIcon={<FileDownloadOutlinedIcon />} onClick={handleExport}>
             Экспорт
           </Button>
-          <Button size="small" variant="outlined" color="warning" startIcon={<ClearAllOutlinedIcon />} onClick={() => setClearDialogOpen(true)}>
+          <Button size="small" variant="outlined" color="warning" startIcon={<ClearAllOutlinedIcon />} onClick={() => setClearDialogOpen(true)} disabled={!canEdit}>
             Сбросить
           </Button>
         </Stack>
       </Box>
 
-      <FormControlLabel
-        sx={{ mb: 2 }}
-        control={<Switch checked={editingEnabled} onChange={(e) => setEditingEnabled(e.target.checked)} />}
-        label="Начать редактирование"
-      />
+      {isReadOnlyView ? (
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          Страница открыта в режиме просмотра: редактирование отключено.
+        </Typography>
+      ) : (
+        <FormControlLabel
+          sx={{ mb: 2 }}
+          control={<Switch checked={editingEnabled} onChange={(e) => setEditingEnabled(e.target.checked)} />}
+          label="Начать редактирование"
+        />
+      )}
 
       <Dialog open={clearDialogOpen} onClose={() => setClearDialogOpen(false)}>
         <DialogTitle>Сбросить изменения?</DialogTitle>
@@ -411,7 +513,7 @@ export function IntegrationDetailsPage() {
             value={name}
             onChange={(e) => setName(e.target.value)}
             fullWidth
-            disabled={!editingEnabled}
+            disabled={!canEdit}
           />
 
           <FormControl fullWidth>
@@ -424,7 +526,7 @@ export function IntegrationDetailsPage() {
                 setIntegrationKind(value)
               }}
               fullWidth
-              disabled={!editingEnabled}
+              disabled={!canEdit}
               sx={{ flexWrap: 'wrap' }}
             >
               <ToggleButton value="pull" sx={{ flex: 1, textTransform: 'none' }}>
@@ -444,36 +546,58 @@ export function IntegrationDetailsPage() {
             value={endpointUrl}
             onChange={(e) => setEndpointUrl(e.target.value)}
             fullWidth
-            disabled={!editingEnabled}
+            disabled={!canEdit}
           />
 
-          <FormControl fullWidth>
-            <FormLabel id="integration-status-label" sx={{ mb: 0.75, display: 'block' }}>
-              Статус
-            </FormLabel>
-            <Select
-              aria-labelledby="integration-status-label"
-              value={status}
-              onChange={(e) => setStatus(e.target.value as IntegrationDetails['status'])}
-              disabled={!editingEnabled}
-            >
-              <MenuItem value="active">Активно</MenuItem>
-              <MenuItem value="inactive">Не активно</MenuItem>
-            </Select>
-          </FormControl>
+          <FormControlLabel
+            control={
+              <Switch
+                checked={status === 'active'}
+                onChange={(e) => void handleStatusSwitch(e.target.checked)}
+                disabled={statusUpdating || saving || isReadOnlyView}
+              />
+            }
+            label={
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Typography variant="body2">Статус:</Typography>
+                <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                  {status === 'active' ? 'Active' : 'Disable'}
+                </Typography>
+                {statusUpdating ? <CircularProgress size={14} /> : null}
+              </Box>
+            }
+          />
 
           <TextField label="Автор изменения" value={authorName} fullWidth disabled />
           <TextField label="Обновлён" value={updatedAt ? new Date(updatedAt).toLocaleString('ru-RU') : ''} fullWidth disabled />
 
-          <FormControl fullWidth error={Boolean(riskModelsError)}>
-            <FormLabel id="risk-model-label" sx={{ mb: 0.75, display: 'block' }}>
-              Выбрать модель рискового объекта
+          <FormControl
+            fullWidth
+            disabled={!canEdit || riskModelsLoading || riskModels.length === 0}
+            error={Boolean(riskModelsError)}
+          >
+            <FormLabel id="risk-object-model-label" sx={{ mb: 0.75, display: 'block' }}>
+              Модель рискового объекта
             </FormLabel>
             <Select
-              aria-labelledby="risk-model-label"
+              aria-labelledby="risk-object-model-label"
               value={riskObjectModelId}
               onChange={(e) => setRiskObjectModelId(e.target.value as string)}
-              disabled={!editingEnabled}
+              disabled={!canEdit}
+              displayEmpty
+              renderValue={(selected) => {
+                if (!selected) {
+                  return (
+                    <Typography component="span" color="text.secondary">
+                      {riskModels.length === 0 && !riskModelsLoading
+                        ? 'Нет доступных моделей'
+                        : '— не выбрано —'}
+                    </Typography>
+                  )
+                }
+                const m = riskModels.find((x) => x.id === selected)
+                return m ? m.name : selected
+              }}
             >
               {riskModels.map((m) => (
                 <MenuItem key={m.id} value={m.id}>
@@ -481,7 +605,15 @@ export function IntegrationDetailsPage() {
                 </MenuItem>
               ))}
             </Select>
-            {riskModelsError ? <Alert severity="error" sx={{ mt: 1 }}>{riskModelsError}</Alert> : null}
+            {riskModelsLoading ? (
+              <FormHelperText>Загрузка списка…</FormHelperText>
+            ) : riskModelsError ? (
+              <Alert severity="error" sx={{ mt: 1 }}>
+                {riskModelsError}
+              </Alert>
+            ) : riskModels.length === 0 ? (
+              <FormHelperText>Список моделей пуст.</FormHelperText>
+            ) : null}
           </FormControl>
 
           <Box>
@@ -489,8 +621,23 @@ export function IntegrationDetailsPage() {
               Сопоставление полей
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              В режиме просмотра поля отключены. Включите «Начать редактирование», чтобы менять правила.
+              {isReadOnlyView
+                ? 'Эта карточка открыта только для просмотра.'
+                : 'В режиме просмотра поля отключены. Включите «Начать редактирование», чтобы менять правила.'}
             </Typography>
+            {riskObjectModelId && modelDefinitionLoading ? (
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+                <CircularProgress size={18} />
+                <Typography variant="body2" color="text.secondary">
+                  Загрузка структуры модели…
+                </Typography>
+              </Box>
+            ) : null}
+            {modelDefinitionError ? (
+              <Alert severity="error" sx={{ mb: 2 }}>
+                {modelDefinitionError}
+              </Alert>
+            ) : null}
             <Stack spacing={2}>
               {mappingRows.map((row, index) => (
                 <Paper key={row.id} variant="outlined" sx={{ p: 2 }}>
@@ -499,7 +646,7 @@ export function IntegrationDetailsPage() {
                       <Typography variant="caption" color="text.secondary">
                         Правило {index + 1}
                       </Typography>
-                      <IconButton size="small" onClick={() => removeMappingRow(row.id)} disabled={!editingEnabled}>
+                      <IconButton size="small" onClick={() => removeMappingRow(row.id)} disabled={!canEdit}>
                         <DeleteOutlinedIcon fontSize="small" />
                       </IconButton>
                     </Box>
@@ -509,9 +656,18 @@ export function IntegrationDetailsPage() {
                       onChange={(e) => patchMappingRow(row.id, { from: e.target.value })}
                       fullWidth
                       size="small"
-                      disabled={!editingEnabled}
+                      disabled={!canEdit}
                     />
-                    {targetPaths.length > 0 ? (
+                    {modelDefinitionLoading ? (
+                      <TextField
+                        label="Преобразовать в"
+                        value=""
+                        fullWidth
+                        size="small"
+                        disabled
+                        placeholder="Загрузка схемы…"
+                      />
+                    ) : targetPaths.length > 0 ? (
                       <FormControl fullWidth size="small">
                         <FormLabel id={`map-to-${row.id}`} sx={{ mb: 0.5, display: 'block', typography: 'body2', fontWeight: 500 }}>
                           Преобразовать в
@@ -520,7 +676,7 @@ export function IntegrationDetailsPage() {
                           aria-labelledby={`map-to-${row.id}`}
                           value={row.to}
                           onChange={(e) => patchMappingRow(row.id, { to: e.target.value as string })}
-                          disabled={!editingEnabled}
+                          disabled={!canEdit}
                         >
                           <MenuItem value="">
                             <em>— не выбрано —</em>
@@ -539,7 +695,14 @@ export function IntegrationDetailsPage() {
                         onChange={(e) => patchMappingRow(row.id, { to: e.target.value })}
                         fullWidth
                         size="small"
-                        disabled={!editingEnabled}
+                        disabled={!canEdit}
+                        helperText={
+                          modelDefinitionError
+                            ? undefined
+                            : modelDefinition
+                              ? 'В схеме нет распознанных путей — введите вручную.'
+                              : 'Структура модели не загружена.'
+                        }
                       />
                     )}
                     <TextField
@@ -550,13 +713,13 @@ export function IntegrationDetailsPage() {
                       size="small"
                       multiline
                       minRows={2}
-                      disabled={!editingEnabled}
+                      disabled={!canEdit}
                     />
                   </Stack>
                 </Paper>
               ))}
             </Stack>
-            <Button variant="outlined" onClick={addMappingRow} sx={{ mt: 2 }} disabled={!editingEnabled}>
+            <Button variant="outlined" onClick={addMappingRow} sx={{ mt: 2 }} disabled={!canEdit}>
               Добавить правило
             </Button>
           </Box>

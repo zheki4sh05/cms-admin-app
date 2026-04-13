@@ -7,11 +7,14 @@ export type IntegrationMappingRule = {
   transform?: string
 }
 
+/** Элемент каталога моделей (ответ GET /api/risk-object-models). */
+export type RiskObjectModelListItem = { id: string; name: string }
+
+/** Полная модель с полем definition (ответ GET /api/risk-object-models/:id). */
 export type RiskObjectModel = {
   id: string
   name: string
-  /** Схема целевого объекта: ключи для поля «Преобразовать в». */
-  definition?: Record<string, unknown>
+  definition: Record<string, unknown>
 }
 
 export type IntegrationDraftPayload = {

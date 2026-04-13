@@ -9,8 +9,14 @@ export type IntegrationConfig = {
   authorName: string
 }
 
+export type IntegrationConfigListPage = {
+  items: IntegrationConfig[]
+  hasMore: boolean
+}
+
 export type IntegrationChangeHistoryEntry = {
   id: string
+  integrationId?: string
   changedAt: string
   configName: string
   description: string
@@ -47,10 +53,13 @@ export type IntegrationUpdatePayload = {
   endpointUrl: string
   riskObjectModelId: string
   mapping_rules: IntegrationMappingRule[]
-  status: IntegrationConfigStatus
 }
 
 export type IntegrationUpdateResponse = {
   id: string
   savedAt: string
+}
+
+export type IntegrationStatusUpdatePayload = {
+  status: IntegrationConfigStatus
 }

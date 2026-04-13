@@ -2,23 +2,34 @@ import { apiUrl } from './baseUrl'
 import type {
   IntegrationChangeHistoryPage,
   IntegrationConfig,
+  IntegrationConfigListPage,
   IntegrationDetails,
+  IntegrationStatusUpdatePayload,
   IntegrationUpdatePayload,
   IntegrationUpdateResponse,
 } from '../types/integration'
-import type {
-  IntegrationDraftPayload,
-  IntegrationDraftSaveResponse,
-  RiskObjectModel,
-} from '../types/integrationDraft'
 import type {
   RiskObject,
   RiskObjectCreatePayload,
   RiskObjectCreateResponse,
   RiskObjectDetails,
+  RiskObjectHistoryDetails,
   RiskObjectHistoryPage,
+  RiskObjectListPage,
+  RiskObjectStatusUpdatePayload,
+  RiskObjectUpdatePayload,
   RiskObjectUpdateResponse,
 } from '../types/riskObjects'
+import type { RiskObjectModel, RiskObjectModelListItem } from '../types/integrationDraft'
+
+const COMPANY_ID_STORAGE_KEY = 'trustflow_company_id'
+
+function getStoredCompanyId(): string | null {
+  if (typeof window === 'undefined') return null
+  const raw = localStorage.getItem(COMPANY_ID_STORAGE_KEY)
+  const trimmed = raw?.trim()
+  return trimmed ? trimmed : null
+}
 
 function authHeaders(token: string | null): HeadersInit {
   const headers: Record<string, string> = {
@@ -26,6 +37,10 @@ function authHeaders(token: string | null): HeadersInit {
   }
   if (token) {
     headers.Authorization = `Bearer ${token}`
+  }
+  const companyId = getStoredCompanyId()
+  if (companyId) {
+    headers.CompanyId = companyId
   }
   return headers
 }
@@ -126,18 +141,30 @@ export async function getIntegrationChangeHistory(
   }
 }
 
-export async function getIntegrationConfigs(token: string) {
-  const res = await fetch(apiUrl('integration-configs'), {
+export async function getIntegrationConfigs(
+  token: string,
+  page: number,
+  pageSize: number,
+): Promise<IntegrationConfigListPage> {
+  const params = new URLSearchParams({
+    page: String(page),
+    pageSize: String(pageSize),
+  })
+  const res = await fetch(`${apiUrl('integration-configs')}?${params.toString()}`, {
     headers: authHeaders(token),
   })
   const data = (await res.json().catch(() => ({}))) as {
     message?: string
     items?: IntegrationConfig[]
+    hasMore?: boolean
   }
   if (!res.ok) {
     throw new Error(data.message ?? 'Не удалось загрузить конфигурации')
   }
-  return (data.items ?? []) as IntegrationConfig[]
+  return {
+    items: (data.items ?? []) as IntegrationConfig[],
+    hasMore: Boolean(data.hasMore),
+  }
 }
 
 export async function getIntegrationConfigById(
@@ -187,6 +214,53 @@ export async function putIntegrationConfigById(
   }
   if (!res.ok) {
     throw new Error(data.message ?? 'Не удалось сохранить интеграцию')
+  }
+  if (!data.id || !data.savedAt) {
+    throw new Error('Некорректный ответ сервера')
+  }
+  return { id: data.id, savedAt: data.savedAt }
+}
+
+export async function postIntegrationConfigCreate(
+  token: string,
+  payload: IntegrationUpdatePayload,
+): Promise<IntegrationUpdateResponse> {
+  const res = await fetch(apiUrl('integration-configs'), {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: JSON.stringify(payload),
+  })
+  const data = (await res.json().catch(() => ({}))) as {
+    message?: string
+    id?: string
+    savedAt?: string
+  }
+  if (!res.ok) {
+    throw new Error(data.message ?? 'Не удалось создать интеграцию')
+  }
+  if (!data.id || !data.savedAt) {
+    throw new Error('Некорректный ответ сервера')
+  }
+  return { id: data.id, savedAt: data.savedAt }
+}
+
+export async function putIntegrationConfigStatusById(
+  token: string,
+  id: string,
+  payload: IntegrationStatusUpdatePayload,
+): Promise<IntegrationUpdateResponse> {
+  const res = await fetch(apiUrl(`integration-configs/${id}/status`), {
+    method: 'PUT',
+    headers: authHeaders(token),
+    body: JSON.stringify(payload),
+  })
+  const data = (await res.json().catch(() => ({}))) as {
+    message?: string
+    id?: string
+    savedAt?: string
+  }
+  if (!res.ok) {
+    throw new Error(data.message ?? 'Не удалось обновить статус интеграции')
   }
   if (!data.id || !data.savedAt) {
     throw new Error('Некорректный ответ сервера')
@@ -247,20 +321,6 @@ export async function putSettings(
   }
 }
 
-export async function getRiskObjectModels(token: string): Promise<RiskObjectModel[]> {
-  const res = await fetch(apiUrl('risk-object-models'), {
-    headers: authHeaders(token),
-  })
-  const data = (await res.json().catch(() => ({}))) as {
-    message?: string
-    items?: RiskObjectModel[]
-  }
-  if (!res.ok) {
-    throw new Error(data.message ?? 'Не удалось загрузить модели')
-  }
-  return data.items ?? []
-}
-
 export async function postRiskObjectCreate(
   token: string,
   payload: RiskObjectCreatePayload,
@@ -284,18 +344,63 @@ export async function postRiskObjectCreate(
   return { id: data.id, savedAt: data.savedAt }
 }
 
-export async function getRiskObjects(token: string): Promise<RiskObject[]> {
-  const res = await fetch(apiUrl('risk-objects'), {
+export async function getRiskObjects(
+  token: string,
+  page: number,
+  pageSize: number,
+): Promise<RiskObjectListPage> {
+  const params = new URLSearchParams({
+    page: String(page),
+    pageSize: String(pageSize),
+  })
+  const res = await fetch(`${apiUrl('risk-objects')}?${params.toString()}`, {
     headers: authHeaders(token),
   })
   const data = (await res.json().catch(() => ({}))) as {
     message?: string
     items?: RiskObject[]
+    hasMore?: boolean
   }
   if (!res.ok) {
     throw new Error(data.message ?? 'Не удалось загрузить рисковые объекты')
   }
-  return (data.items ?? []) as RiskObject[]
+  return {
+    items: (data.items ?? []) as RiskObject[],
+    hasMore: Boolean(data.hasMore),
+  }
+}
+
+export async function getRiskObjectModels(token: string): Promise<RiskObjectModelListItem[]> {
+  const res = await fetch(apiUrl('risk-object-models'), {
+    headers: authHeaders(token),
+  })
+  const data = (await res.json().catch(() => ({}))) as {
+    message?: string
+    items?: RiskObjectModelListItem[]
+  }
+  if (!res.ok) {
+    throw new Error(data.message ?? 'Не удалось загрузить модели рисковых объектов')
+  }
+  return data.items ?? []
+}
+
+export async function getRiskObjectModelById(token: string, id: string): Promise<RiskObjectModel> {
+  const res = await fetch(apiUrl(`risk-object-models/${id}`), {
+    headers: authHeaders(token),
+  })
+  const data = (await res.json().catch(() => ({}))) as {
+    message?: string
+    id?: string
+    name?: string
+    definition?: Record<string, unknown>
+  }
+  if (!res.ok) {
+    throw new Error(data.message ?? 'Не удалось загрузить модель рискового объекта')
+  }
+  if (!data.id || !data.name || !data.definition) {
+    throw new Error('Некорректный ответ сервера')
+  }
+  return { id: data.id, name: data.name, definition: data.definition }
 }
 
 export async function getRiskObjectById(
@@ -340,7 +445,7 @@ export async function getRiskObjectById(
 export async function putRiskObjectById(
   token: string,
   id: string,
-  payload: RiskObjectCreatePayload,
+  payload: RiskObjectUpdatePayload,
 ): Promise<RiskObjectUpdateResponse> {
   const res = await fetch(apiUrl(`risk-objects/${id}`), {
     method: 'PUT',
@@ -354,6 +459,30 @@ export async function putRiskObjectById(
   }
   if (!res.ok) {
     throw new Error(data.message ?? 'Не удалось сохранить')
+  }
+  if (!data.id || !data.savedAt) {
+    throw new Error('Некорректный ответ сервера')
+  }
+  return { id: data.id, savedAt: data.savedAt }
+}
+
+export async function putRiskObjectStatusById(
+  token: string,
+  id: string,
+  payload: RiskObjectStatusUpdatePayload,
+): Promise<RiskObjectUpdateResponse> {
+  const res = await fetch(apiUrl(`risk-objects/${id}/status`), {
+    method: 'PUT',
+    headers: authHeaders(token),
+    body: JSON.stringify(payload),
+  })
+  const data = (await res.json().catch(() => ({}))) as {
+    message?: string
+    id?: string
+    savedAt?: string
+  }
+  if (!res.ok) {
+    throw new Error(data.message ?? 'Не удалось обновить статус')
   }
   if (!data.id || !data.savedAt) {
     throw new Error('Некорректный ответ сервера')
@@ -398,25 +527,42 @@ export async function getRiskObjectsChangeHistory(
   }
 }
 
-export async function putIntegrationDraftCurrent(
+export async function getRiskObjectChangeHistoryById(
   token: string,
-  payload: IntegrationDraftPayload,
-): Promise<IntegrationDraftSaveResponse> {
-  const res = await fetch(apiUrl('integration-drafts/current'), {
-    method: 'PUT',
+  historyId: string,
+): Promise<RiskObjectHistoryDetails> {
+  const res = await fetch(apiUrl(`risk-objects/change-history/${historyId}`), {
     headers: authHeaders(token),
-    body: JSON.stringify(payload),
   })
   const data = (await res.json().catch(() => ({}))) as {
     message?: string
     id?: string
-    updatedAt?: string
+    riskObjectId?: string
+    changedAt?: string
+    riskObjectName?: string
+    description?: string
+    authorName?: string
   }
   if (!res.ok) {
-    throw new Error(data.message ?? 'Не удалось сохранить черновик')
+    throw new Error(data.message ?? 'Не удалось загрузить запись истории')
   }
-  if (!data.id || !data.updatedAt) {
-    throw new Error('Некорректный ответ при сохранении черновика')
+  if (
+    !data.id ||
+    !data.riskObjectId ||
+    !data.changedAt ||
+    !data.riskObjectName ||
+    !data.description ||
+    !data.authorName
+  ) {
+    throw new Error('Некорректный ответ сервера')
   }
-  return { id: data.id, updatedAt: data.updatedAt }
+  return {
+    id: data.id,
+    riskObjectId: data.riskObjectId,
+    changedAt: data.changedAt,
+    riskObjectName: data.riskObjectName,
+    description: data.description,
+    authorName: data.authorName,
+  }
 }
+

@@ -1,6 +1,7 @@
 import AddIcon from '@mui/icons-material/Add'
+import ChevronLeftIcon from '@mui/icons-material/ChevronLeft'
+import ChevronRightIcon from '@mui/icons-material/ChevronRight'
 import ClearIcon from '@mui/icons-material/Clear'
-import FilterListIcon from '@mui/icons-material/FilterList'
 import SearchIcon from '@mui/icons-material/Search'
 import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined'
 import {
@@ -10,7 +11,6 @@ import {
   Chip,
   CircularProgress,
   Divider,
-  Drawer,
   IconButton,
   InputAdornment,
   List,
@@ -28,7 +28,7 @@ import {
   Toolbar,
   Typography,
 } from '@mui/material'
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   getIntegrationChangeHistory,
@@ -57,7 +57,10 @@ function formatUpdatedAt(iso: string) {
 export function IntegrationPage() {
   const navigate = useNavigate()
   const { token } = useAuth()
+  const LIST_PAGE_SIZE = 6
   const [rows, setRows] = useState<IntegrationConfig[]>([])
+  const [listPage, setListPage] = useState(1)
+  const [listHasMore, setListHasMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -68,18 +71,11 @@ export function IntegrationPage() {
   const [historyLoadingMore, setHistoryLoadingMore] = useState(false)
   const [historySearchInput, setHistorySearchInput] = useState('')
   const [historySearchDebounced, setHistorySearchDebounced] = useState('')
-  const [historyFilters, setHistoryFilters] = useState<Record<string, string>>({})
-  const [historyFiltersOpen, setHistoryFiltersOpen] = useState(false)
 
   const historyScrollRef = useRef<HTMLDivElement | null>(null)
   const historySentinelRef = useRef<HTMLDivElement | null>(null)
   const historyLastPageRef = useRef(0)
   const fetchingHistoryRef = useRef(false)
-
-  const historyFiltersKey = useMemo(
-    () => JSON.stringify(historyFilters),
-    [historyFilters],
-  )
 
   useEffect(() => {
     const t = window.setTimeout(() => {
@@ -87,6 +83,11 @@ export function IntegrationPage() {
     }, 350)
     return () => window.clearTimeout(t)
   }, [historySearchInput])
+
+  useEffect(() => {
+    if (!token) return
+    setListPage(1)
+  }, [token])
 
   const fetchHistoryPage = useCallback(
     async (page: number, append: boolean) => {
@@ -96,10 +97,8 @@ export function IntegrationPage() {
       else setHistoryInitialLoading(true)
       setHistoryError(null)
       try {
-        const hasFilterParams = Object.values(historyFilters).some(Boolean)
         const { items, hasMore } = await getIntegrationChangeHistory(token, page, 5, {
           q: historySearchDebounced || undefined,
-          filters: hasFilterParams ? historyFilters : undefined,
         })
         setHistoryItems((prev) => (append ? [...prev, ...items] : items))
         setHistoryHasMore(hasMore)
@@ -112,7 +111,7 @@ export function IntegrationPage() {
         setHistoryInitialLoading(false)
       }
     },
-    [token, historySearchDebounced, historyFilters],
+    [token, historySearchDebounced],
   )
 
   useEffect(() => {
@@ -120,9 +119,12 @@ export function IntegrationPage() {
     let cancelled = false
     setLoading(true)
     setError(null)
-    getIntegrationConfigs(token)
-      .then((items) => {
-        if (!cancelled) setRows(items)
+    getIntegrationConfigs(token, listPage, LIST_PAGE_SIZE)
+      .then(({ items, hasMore }) => {
+        if (!cancelled) {
+          setRows(items)
+          setListHasMore(hasMore)
+        }
       })
       .catch((e: unknown) => {
         if (!cancelled) {
@@ -135,7 +137,7 @@ export function IntegrationPage() {
     return () => {
       cancelled = true
     }
-  }, [token])
+  }, [token, listPage])
 
   useEffect(() => {
     if (!token) return
@@ -143,7 +145,7 @@ export function IntegrationPage() {
     setHistoryItems([])
     setHistoryHasMore(true)
     void fetchHistoryPage(1, false)
-  }, [token, historySearchDebounced, historyFiltersKey, fetchHistoryPage])
+  }, [token, historySearchDebounced, fetchHistoryPage])
 
   /** Бесконечная подгрузка: корень — блок с вертикальной прокруткой, а не всё окно. */
   useLayoutEffect(() => {
@@ -169,7 +171,6 @@ export function IntegrationPage() {
     historyInitialLoading,
     historyItems.length,
     historySearchDebounced,
-    historyFiltersKey,
     fetchHistoryPage,
   ])
 
@@ -262,6 +263,35 @@ export function IntegrationPage() {
           </TableBody>
         </Table>
       </TableContainer>
+      <Box
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'flex-end',
+          gap: 1,
+          mb: 4,
+        }}
+      >
+        <Typography variant="body2" color="text.secondary" sx={{ mr: 0.5 }}>
+          Страница {listPage}
+        </Typography>
+        <IconButton
+          size="small"
+          aria-label="Предыдущая страница"
+          onClick={() => setListPage((p) => Math.max(1, p - 1))}
+          disabled={loading || listPage <= 1}
+        >
+          <ChevronLeftIcon fontSize="small" />
+        </IconButton>
+        <IconButton
+          size="small"
+          aria-label="Следующая страница"
+          onClick={() => setListPage((p) => p + 1)}
+          disabled={loading || !listHasMore}
+        >
+          <ChevronRightIcon fontSize="small" />
+        </IconButton>
+      </Box>
 
       <Typography variant="h6" component="h2" sx={{ mb: 2 }}>
         История изменений
@@ -298,38 +328,8 @@ export function IntegrationPage() {
               ) : null,
             }}
           />
-          <Button
-            variant="outlined"
-            size="medium"
-            startIcon={<FilterListIcon />}
-            onClick={() => setHistoryFiltersOpen(true)}
-            sx={{ flexShrink: 0 }}
-          >
-            Фильтры
-          </Button>
         </Toolbar>
       </Paper>
-
-      <Drawer
-        anchor="right"
-        open={historyFiltersOpen}
-        onClose={() => setHistoryFiltersOpen(false)}
-        PaperProps={{ sx: { width: { xs: '100%', sm: 360 }, p: 0 } }}
-      >
-        <Box sx={{ p: 2 }}>
-          <Typography variant="h6" sx={{ mb: 1 }}>
-            Фильтры
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Состав фильтров и их имена в query-string вы уточните позже. После этого здесь
-            появятся поля, а значения пойдут в запрос истории вместе с <code>page</code> и{' '}
-            <code>q</code>.
-          </Typography>
-          <Button variant="contained" onClick={() => setHistoryFiltersOpen(false)}>
-            Закрыть
-          </Button>
-        </Box>
-      </Drawer>
 
       {historyError ? (
         <Alert severity="error" sx={{ mb: 2 }}>
@@ -364,8 +364,7 @@ export function IntegrationPage() {
             {!historyInitialLoading && historyItems.length === 0 ? (
               <Box sx={{ py: 5, px: 2, textAlign: 'center' }}>
                 <Typography color="text.secondary">
-                  Ничего не найдено. Попробуйте другой запрос или снимите фильтры (когда они
-                  появятся).
+                  Ничего не найдено. Попробуйте другой запрос.
                 </Typography>
               </Box>
             ) : (
@@ -373,7 +372,10 @@ export function IntegrationPage() {
                 {historyItems.map((entry, index) => (
                   <Box key={entry.id}>
                     {index > 0 ? <Divider component="li" /> : null}
-                    <ListItem alignItems="flex-start" sx={{ py: 1.5, px: 2 }}>
+                    <ListItem
+                      alignItems="flex-start"
+                      sx={{ py: 1.5, px: 2, gap: 1.5, justifyContent: 'space-between' }}
+                    >
                       <ListItemText
                         primaryTypographyProps={{ variant: 'subtitle2', fontWeight: 600 }}
                         primary={entry.configName}
@@ -398,6 +400,19 @@ export function IntegrationPage() {
                           </>
                         }
                       />
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        startIcon={<VisibilityOutlinedIcon fontSize="small" />}
+                        onClick={() =>
+                          entry.integrationId
+                            ? navigate(`/app/integration/${entry.integrationId}?readonly=1`)
+                            : undefined
+                        }
+                        disabled={!entry.integrationId}
+                      >
+                        Просмотреть
+                      </Button>
                     </ListItem>
                   </Box>
                 ))}
