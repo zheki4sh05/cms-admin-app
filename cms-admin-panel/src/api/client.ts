@@ -2,6 +2,9 @@ import { apiUrl } from './baseUrl'
 import type {
   IntegrationChangeHistoryPage,
   IntegrationConfig,
+  IntegrationDetails,
+  IntegrationUpdatePayload,
+  IntegrationUpdateResponse,
 } from '../types/integration'
 import type {
   IntegrationDraftPayload,
@@ -12,7 +15,9 @@ import type {
   RiskObject,
   RiskObjectCreatePayload,
   RiskObjectCreateResponse,
+  RiskObjectDetails,
   RiskObjectHistoryPage,
+  RiskObjectUpdateResponse,
 } from '../types/riskObjects'
 
 function authHeaders(token: string | null): HeadersInit {
@@ -135,6 +140,60 @@ export async function getIntegrationConfigs(token: string) {
   return (data.items ?? []) as IntegrationConfig[]
 }
 
+export async function getIntegrationConfigById(
+  token: string,
+  id: string,
+): Promise<IntegrationDetails> {
+  const res = await fetch(apiUrl(`integration-configs/${id}`), {
+    headers: authHeaders(token),
+  })
+  const data = (await res.json().catch(() => ({}))) as {
+    message?: string
+  } & Partial<IntegrationDetails>
+  if (!res.ok) {
+    throw new Error(data.message ?? 'Не удалось загрузить интеграцию')
+  }
+  if (
+    !data.id ||
+    typeof data.number !== 'number' ||
+    !data.name ||
+    !data.integrationKind ||
+    !data.endpointUrl ||
+    !data.riskObjectModelId ||
+    !Array.isArray(data.mapping_rules) ||
+    !data.status ||
+    !data.authorName ||
+    !data.updatedAt
+  ) {
+    throw new Error('Некорректный ответ сервера')
+  }
+  return data as IntegrationDetails
+}
+
+export async function putIntegrationConfigById(
+  token: string,
+  id: string,
+  payload: IntegrationUpdatePayload,
+): Promise<IntegrationUpdateResponse> {
+  const res = await fetch(apiUrl(`integration-configs/${id}`), {
+    method: 'PUT',
+    headers: authHeaders(token),
+    body: JSON.stringify(payload),
+  })
+  const data = (await res.json().catch(() => ({}))) as {
+    message?: string
+    id?: string
+    savedAt?: string
+  }
+  if (!res.ok) {
+    throw new Error(data.message ?? 'Не удалось сохранить интеграцию')
+  }
+  if (!data.id || !data.savedAt) {
+    throw new Error('Некорректный ответ сервера')
+  }
+  return { id: data.id, savedAt: data.savedAt }
+}
+
 export async function getUsersList(token: string) {
   const res = await fetch(apiUrl('users'), {
     headers: authHeaders(token),
@@ -237,6 +296,69 @@ export async function getRiskObjects(token: string): Promise<RiskObject[]> {
     throw new Error(data.message ?? 'Не удалось загрузить рисковые объекты')
   }
   return (data.items ?? []) as RiskObject[]
+}
+
+export async function getRiskObjectById(
+  token: string,
+  id: string,
+): Promise<RiskObjectDetails> {
+  const res = await fetch(apiUrl(`risk-objects/${id}`), {
+    headers: authHeaders(token),
+  })
+  const data = (await res.json().catch(() => ({}))) as {
+    message?: string
+    id?: string
+    code?: string
+    name?: string
+    status?: RiskObjectDetails['status']
+    updatedAt?: string
+    definition?: Record<string, unknown>
+  }
+  if (!res.ok) {
+    throw new Error(data.message ?? 'Не удалось загрузить рисковый объект')
+  }
+  if (
+    !data.id ||
+    !data.code ||
+    !data.name ||
+    !data.status ||
+    !data.updatedAt ||
+    !data.definition
+  ) {
+    throw new Error('Некорректный ответ сервера')
+  }
+  return {
+    id: data.id,
+    code: data.code,
+    name: data.name,
+    status: data.status,
+    updatedAt: data.updatedAt,
+    definition: data.definition,
+  }
+}
+
+export async function putRiskObjectById(
+  token: string,
+  id: string,
+  payload: RiskObjectCreatePayload,
+): Promise<RiskObjectUpdateResponse> {
+  const res = await fetch(apiUrl(`risk-objects/${id}`), {
+    method: 'PUT',
+    headers: authHeaders(token),
+    body: JSON.stringify(payload),
+  })
+  const data = (await res.json().catch(() => ({}))) as {
+    message?: string
+    id?: string
+    savedAt?: string
+  }
+  if (!res.ok) {
+    throw new Error(data.message ?? 'Не удалось сохранить')
+  }
+  if (!data.id || !data.savedAt) {
+    throw new Error('Некорректный ответ сервера')
+  }
+  return { id: data.id, savedAt: data.savedAt }
 }
 
 export async function getRiskObjectsChangeHistory(

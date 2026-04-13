@@ -1,4 +1,7 @@
 import AddIcon from '@mui/icons-material/Add'
+import ClearIcon from '@mui/icons-material/Clear'
+import FilterListIcon from '@mui/icons-material/FilterList'
+import SearchIcon from '@mui/icons-material/Search'
 import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined'
 import {
   Alert,
@@ -7,6 +10,9 @@ import {
   Chip,
   CircularProgress,
   Divider,
+  Drawer,
+  IconButton,
+  InputAdornment,
   List,
   ListItem,
   ListItemText,
@@ -18,9 +24,11 @@ import {
   TableContainer,
   TableHead,
   TableRow,
+  TextField,
+  Toolbar,
   Typography,
 } from '@mui/material'
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getRiskObjects, getRiskObjectsChangeHistory } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
@@ -52,11 +60,27 @@ export function RiskObjectsPage() {
   const [historyError, setHistoryError] = useState<string | null>(null)
   const [historyInitialLoading, setHistoryInitialLoading] = useState(true)
   const [historyLoadingMore, setHistoryLoadingMore] = useState(false)
+  const [historySearchInput, setHistorySearchInput] = useState('')
+  const [historySearchDebounced, setHistorySearchDebounced] = useState('')
+  const [historyFilters, setHistoryFilters] = useState<Record<string, string>>({})
+  const [historyFiltersOpen, setHistoryFiltersOpen] = useState(false)
 
   const historyScrollRef = useRef<HTMLDivElement | null>(null)
   const historySentinelRef = useRef<HTMLDivElement | null>(null)
   const historyLastPageRef = useRef(0)
   const fetchingHistoryRef = useRef(false)
+
+  const historyFiltersKey = useMemo(
+    () => JSON.stringify(historyFilters),
+    [historyFilters],
+  )
+
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      setHistorySearchDebounced(historySearchInput.trim())
+    }, 350)
+    return () => window.clearTimeout(t)
+  }, [historySearchInput])
 
   useEffect(() => {
     if (!token) return
@@ -88,7 +112,11 @@ export function RiskObjectsPage() {
       else setHistoryInitialLoading(true)
       setHistoryError(null)
       try {
-        const { items, hasMore } = await getRiskObjectsChangeHistory(token, page, 5)
+        const hasFilterParams = Object.values(historyFilters).some(Boolean)
+        const { items, hasMore } = await getRiskObjectsChangeHistory(token, page, 5, {
+          q: historySearchDebounced || undefined,
+          filters: hasFilterParams ? historyFilters : undefined,
+        })
         setHistoryItems((prev) => (append ? [...prev, ...items] : items))
         setHistoryHasMore(hasMore)
         historyLastPageRef.current = page
@@ -100,7 +128,7 @@ export function RiskObjectsPage() {
         setHistoryInitialLoading(false)
       }
     },
-    [token],
+    [token, historySearchDebounced, historyFilters],
   )
 
   useEffect(() => {
@@ -109,7 +137,7 @@ export function RiskObjectsPage() {
     setHistoryItems([])
     setHistoryHasMore(true)
     void fetchHistoryPage(1, false)
-  }, [token, fetchHistoryPage])
+  }, [token, historySearchDebounced, historyFiltersKey, fetchHistoryPage])
 
   useLayoutEffect(() => {
     if (!token || historyInitialLoading) return
@@ -133,6 +161,8 @@ export function RiskObjectsPage() {
     historyHasMore,
     historyInitialLoading,
     historyItems.length,
+    historySearchDebounced,
+    historyFiltersKey,
     fetchHistoryPage,
   ])
 
@@ -207,9 +237,7 @@ export function RiskObjectsPage() {
                         size="small"
                         variant="outlined"
                         startIcon={<VisibilityOutlinedIcon fontSize="small" />}
-                        onClick={() => {
-                          /* экран просмотра — позже */
-                        }}
+                        onClick={() => navigate(`/app/risk-objects/${row.id}`)}
                       >
                         Просмотреть
                       </Button>
@@ -223,6 +251,80 @@ export function RiskObjectsPage() {
       <Typography variant="h6" component="h2" sx={{ mb: 2 }}>
         История изменений
       </Typography>
+
+      <Paper variant="outlined" sx={{ mb: 2, px: { xs: 1, sm: 2 }, py: 1.5 }}>
+        <Toolbar
+          disableGutters
+          variant="dense"
+          sx={{ flexWrap: 'wrap', gap: 1.5, minHeight: 'auto', py: 0.5 }}
+        >
+          <TextField
+            size="small"
+            placeholder="Поиск по слову…"
+            value={historySearchInput}
+            onChange={(e) => setHistorySearchInput(e.target.value)}
+            sx={{ flex: '1 1 220px', minWidth: 180, maxWidth: 480 }}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon fontSize="small" color="action" />
+                </InputAdornment>
+              ),
+              endAdornment: historySearchInput ? (
+                <InputAdornment position="end">
+                  <IconButton
+                    size="small"
+                    aria-label="Очистить поиск"
+                    onClick={() => setHistorySearchInput('')}
+                  >
+                    <ClearIcon fontSize="small" />
+                  </IconButton>
+                </InputAdornment>
+              ) : null,
+            }}
+          />
+          <Button
+            variant="outlined"
+            size="medium"
+            startIcon={<FilterListIcon />}
+            onClick={() => setHistoryFiltersOpen(true)}
+            sx={{ flexShrink: 0 }}
+          >
+            Фильтры
+          </Button>
+        </Toolbar>
+      </Paper>
+
+      <Drawer
+        anchor="right"
+        open={historyFiltersOpen}
+        onClose={() => setHistoryFiltersOpen(false)}
+        PaperProps={{ sx: { width: { xs: '100%', sm: 360 }, p: 0 } }}
+      >
+        <Box sx={{ p: 2 }}>
+          <Typography variant="h6" sx={{ mb: 1 }}>
+            Фильтры
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Поля фильтрации вы уточните позже. После этого здесь появятся конкретные
+            контролы, а их значения отправятся в историю как query-параметры вместе с
+            <code>page</code>, <code>pageSize</code> и <code>q</code>.
+          </Typography>
+          <Button
+            variant="outlined"
+            sx={{ mr: 1 }}
+            onClick={() => {
+              setHistoryFilters({})
+              setHistoryFiltersOpen(false)
+            }}
+          >
+            Сбросить
+          </Button>
+          <Button variant="contained" onClick={() => setHistoryFiltersOpen(false)}>
+            Закрыть
+          </Button>
+        </Box>
+      </Drawer>
 
       {historyError ? (
         <Alert severity="error" sx={{ mb: 2 }}>
@@ -249,7 +351,9 @@ export function RiskObjectsPage() {
           >
             {!historyInitialLoading && historyItems.length === 0 ? (
               <Box sx={{ py: 5, px: 2, textAlign: 'center' }}>
-                <Typography color="text.secondary">Нет записей в истории.</Typography>
+                <Typography color="text.secondary">
+                  Ничего не найдено. Попробуйте другой запрос или снимите фильтры.
+                </Typography>
               </Box>
             ) : (
               <List disablePadding>

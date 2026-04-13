@@ -40,7 +40,7 @@ const mockUsers: Array<{
   },
 ]
 
-const mockIntegrationConfigs = [
+let mockIntegrationConfigs = [
   {
     id: 'ic-1',
     number: 1,
@@ -80,6 +80,75 @@ const mockIntegrationConfigs = [
     updatedAt: '2026-04-12T08:20:00.000Z',
     status: 'active' as const,
     authorName: 'Мария Петрова',
+  },
+]
+
+let mockIntegrationConfigDetails = [
+  {
+    id: 'ic-1',
+    number: 1,
+    name: 'Обмен с 1С:Бухгалтерия',
+    integrationKind: 'pull',
+    endpointUrl: 'https://1c.example.local/api/exchange',
+    riskObjectModelId: 'rom-1',
+    mapping_rules: [
+      { from: 'Ref_Key', to: 'external_id' },
+      { from: 'Date', to: 'timestamp', transform: 'date_to_iso' },
+    ],
+    status: 'active' as const,
+    authorName: 'Алексей Иванов',
+    updatedAt: '2026-04-11T14:32:00.000Z',
+  },
+  {
+    id: 'ic-2',
+    number: 2,
+    name: 'REST API: платёжный шлюз',
+    integrationKind: 'push',
+    endpointUrl: 'https://payments.example.local/v1/hook',
+    riskObjectModelId: 'rom-2',
+    mapping_rules: [
+      { from: 'merchant_id', to: 'external_id' },
+      { from: 'created_at', to: 'timestamp', transform: 'date_to_iso' },
+    ],
+    status: 'active' as const,
+    authorName: 'Мария Петрова',
+    updatedAt: '2026-04-09T09:15:00.000Z',
+  },
+  {
+    id: 'ic-3',
+    number: 3,
+    name: 'Webhook: уведомления в Telegram',
+    integrationKind: 'broker',
+    endpointUrl: 'https://notify.example.local/telegram',
+    riskObjectModelId: 'rom-3',
+    mapping_rules: [{ from: 'person_id', to: 'external_id' }],
+    status: 'inactive' as const,
+    authorName: 'Алексей Иванов',
+    updatedAt: '2026-03-28T18:00:00.000Z',
+  },
+  {
+    id: 'ic-4',
+    number: 4,
+    name: 'SFTP: выгрузка отчётов',
+    integrationKind: 'pull',
+    endpointUrl: 'sftp://reports.example.local/export',
+    riskObjectModelId: 'rom-4',
+    mapping_rules: [{ from: 'group_id', to: 'group_id' }],
+    status: 'inactive' as const,
+    authorName: 'Иван Сидоров',
+    updatedAt: '2026-04-02T11:45:00.000Z',
+  },
+  {
+    id: 'ic-5',
+    number: 5,
+    name: 'OAuth2: корпоративный SSO',
+    integrationKind: 'push',
+    endpointUrl: 'https://sso.example.local/api/sync',
+    riskObjectModelId: 'rom-1',
+    mapping_rules: [{ from: 'sub', to: 'external_id' }],
+    status: 'active' as const,
+    authorName: 'Мария Петрова',
+    updatedAt: '2026-04-12T08:20:00.000Z',
   },
 ]
 
@@ -175,6 +244,15 @@ const mockRiskObjectModels = [
 
 let integrationDraftCurrent: Record<string, unknown> | null = null
 
+function defaultRiskDefinition(name: string): Record<string, unknown> {
+  return {
+    external_id: null,
+    display_name: null,
+    source_name: name,
+    attributes: [{ key: null, value: null }],
+  }
+}
+
 let mockRiskObjects = [
   {
     id: 'ro-1',
@@ -183,6 +261,12 @@ let mockRiskObjects = [
     category: 'Контрагент',
     status: 'active' as const,
     updatedAt: '2026-04-12T10:15:00.000Z',
+    definition: {
+      external_id: null,
+      legal_name: null,
+      inn: null,
+      contacts: [{ phone: null, email: null }],
+    },
   },
   {
     id: 'ro-2',
@@ -191,6 +275,12 @@ let mockRiskObjects = [
     category: 'Контрагент',
     status: 'active' as const,
     updatedAt: '2026-04-11T14:40:00.000Z',
+    definition: {
+      external_id: null,
+      fio: null,
+      inn: null,
+      flags: [{ code: null, value: null }],
+    },
   },
   {
     id: 'ro-3',
@@ -199,6 +289,11 @@ let mockRiskObjects = [
     category: 'Перевозчик',
     status: 'active' as const,
     updatedAt: '2026-04-10T09:00:00.000Z',
+    definition: {
+      external_id: null,
+      company_name: null,
+      route: [{ from: null, to: null }],
+    },
   },
   {
     id: 'ro-4',
@@ -207,6 +302,11 @@ let mockRiskObjects = [
     category: 'Финансовая организация',
     status: 'archived' as const,
     updatedAt: '2026-03-28T16:20:00.000Z',
+    definition: {
+      external_id: null,
+      bank_name: null,
+      bic: null,
+    },
   },
   {
     id: 'ro-5',
@@ -215,6 +315,11 @@ let mockRiskObjects = [
     category: 'Контрагент',
     status: 'active' as const,
     updatedAt: '2026-04-09T11:30:00.000Z',
+    definition: {
+      external_id: null,
+      short_name: null,
+      tags: [{ key: null }],
+    },
   },
   {
     id: 'ro-6',
@@ -223,6 +328,11 @@ let mockRiskObjects = [
     category: 'Группа',
     status: 'active' as const,
     updatedAt: '2026-04-08T08:45:00.000Z',
+    definition: {
+      group_id: null,
+      group_name: null,
+      members: [{ member_id: null, role: null }],
+    },
   },
 ]
 
@@ -386,6 +496,76 @@ export const handlers = [
     return HttpResponse.json({ items, hasMore })
   }),
 
+  http.get('/api/integration-configs/:id', async ({ request, params }) => {
+    await delay(260)
+    const token = parseAuth(request)
+    if (token !== MOCK_TOKEN) {
+      return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
+    }
+    const id = String(params.id ?? '')
+    const row = mockIntegrationConfigDetails.find((it) => it.id === id)
+    if (!row) {
+      return HttpResponse.json({ message: 'Интеграция не найдена' }, { status: 404 })
+    }
+    return HttpResponse.json(row)
+  }),
+
+  http.put('/api/integration-configs/:id', async ({ request, params }) => {
+    await delay(300)
+    const token = parseAuth(request)
+    if (token !== MOCK_TOKEN) {
+      return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
+    }
+    const id = String(params.id ?? '')
+    const idx = mockIntegrationConfigDetails.findIndex((it) => it.id === id)
+    if (idx < 0) {
+      return HttpResponse.json({ message: 'Интеграция не найдена' }, { status: 404 })
+    }
+    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>
+    const updatedAt = new Date().toISOString()
+    const prev = mockIntegrationConfigDetails[idx]
+    const next = {
+      ...prev,
+      name: typeof body.name === 'string' && body.name.trim() ? body.name.trim() : prev.name,
+      integrationKind:
+        body.integrationKind === 'pull' ||
+        body.integrationKind === 'push' ||
+        body.integrationKind === 'broker'
+          ? body.integrationKind
+          : prev.integrationKind,
+      endpointUrl:
+        typeof body.endpointUrl === 'string' && body.endpointUrl.trim()
+          ? body.endpointUrl.trim()
+          : prev.endpointUrl,
+      riskObjectModelId:
+        typeof body.riskObjectModelId === 'string' && body.riskObjectModelId.trim()
+          ? body.riskObjectModelId.trim()
+          : prev.riskObjectModelId,
+      mapping_rules: Array.isArray(body.mapping_rules)
+        ? body.mapping_rules
+        : prev.mapping_rules,
+      status:
+        body.status === 'active' || body.status === 'inactive'
+          ? body.status
+          : prev.status,
+      authorName: adminUser.name,
+      updatedAt,
+    }
+    mockIntegrationConfigDetails[idx] = next
+    mockIntegrationConfigs = mockIntegrationConfigs.map((it) =>
+      it.id === id
+        ? {
+            ...it,
+            name: next.name,
+            status: next.status,
+            authorName: next.authorName,
+            updatedAt: next.updatedAt,
+          }
+        : it,
+    )
+    return HttpResponse.json({ id, savedAt: updatedAt })
+  }),
+
   http.get('/api/risk-object-models', async ({ request }) => {
     await delay(220)
     const token = parseAuth(request)
@@ -421,6 +601,10 @@ export const handlers = [
       category: 'Конструктор',
       status: 'active' as const,
       updatedAt: new Date().toISOString(),
+      definition:
+        body.definition && typeof body.definition === 'object' && !Array.isArray(body.definition)
+          ? (body.definition as Record<string, unknown>)
+          : defaultRiskDefinition(name),
     }
     mockRiskObjects = [row, ...mockRiskObjects]
     return HttpResponse.json(
@@ -464,6 +648,61 @@ export const handlers = [
     const items = pool.slice(start, start + pageSize)
     const hasMore = start + items.length < pool.length
     return HttpResponse.json({ items, hasMore })
+  }),
+
+  http.get('/api/risk-objects/:id', async ({ request, params }) => {
+    await delay(240)
+    const token = parseAuth(request)
+    if (token !== MOCK_TOKEN) {
+      return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
+    }
+    const id = String(params.id ?? '')
+    const row = mockRiskObjects.find((r) => r.id === id)
+    if (!row) {
+      return HttpResponse.json({ message: 'Объект не найден' }, { status: 404 })
+    }
+    return HttpResponse.json({
+      id: row.id,
+      code: row.code,
+      name: row.name,
+      status: row.status,
+      updatedAt: row.updatedAt,
+      definition:
+        row.definition && typeof row.definition === 'object' && !Array.isArray(row.definition)
+          ? row.definition
+          : defaultRiskDefinition(row.name),
+    })
+  }),
+
+  http.put('/api/risk-objects/:id', async ({ request, params }) => {
+    await delay(300)
+    const token = parseAuth(request)
+    if (token !== MOCK_TOKEN) {
+      return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
+    }
+    const id = String(params.id ?? '')
+    const idx = mockRiskObjects.findIndex((r) => r.id === id)
+    if (idx < 0) {
+      return HttpResponse.json({ message: 'Объект не найден' }, { status: 404 })
+    }
+    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>
+    const nameRaw = body.name
+    const nextName =
+      typeof nameRaw === 'string' && nameRaw.trim() !== ''
+        ? nameRaw.trim()
+        : mockRiskObjects[idx].name
+    const updatedAt = new Date().toISOString()
+    const nextDefinition =
+      body.definition && typeof body.definition === 'object' && !Array.isArray(body.definition)
+        ? (body.definition as Record<string, unknown>)
+        : mockRiskObjects[idx].definition
+    mockRiskObjects[idx] = {
+      ...mockRiskObjects[idx],
+      name: nextName,
+      updatedAt,
+      definition: nextDefinition,
+    }
+    return HttpResponse.json({ id, savedAt: updatedAt })
   }),
 
   http.put('/api/integration-drafts/current', async ({ request }) => {

@@ -33,3 +33,17 @@ export type RiskObjectCreatePayload = {
   name: string
   definition: Record<string, unknown>
 }
+
+export type RiskObjectDetails = {
+  id: string
+  code: string
+  name: string
+  status: RiskObjectStatus
+  updatedAt: string
+  definition: Record<string, unknown>
+}
+
+export type RiskObjectUpdateResponse = {
+  id: string
+  savedAt: string
+}

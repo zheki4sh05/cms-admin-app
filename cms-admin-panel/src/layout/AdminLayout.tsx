@@ -17,6 +17,7 @@ import {
 } from '@mui/material'
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft'
 import DashboardOutlinedIcon from '@mui/icons-material/DashboardOutlined'
+import GavelOutlinedIcon from '@mui/icons-material/GavelOutlined'
 import HubOutlinedIcon from '@mui/icons-material/HubOutlined'
 import LogoutOutlinedIcon from '@mui/icons-material/LogoutOutlined'
 import MenuIcon from '@mui/icons-material/Menu'
@@ -43,6 +44,7 @@ const navItemsMain: readonly NavItem[] = [
   { to: '/app/users', label: 'Пользователи', Icon: PeopleOutlinedIcon },
   { to: '/app/risk-objects', label: 'Рисковые объекты', Icon: ShieldOutlinedIcon },
   { to: '/app/integration', label: 'Интеграция', Icon: HubOutlinedIcon },
+  { to: '/app/rules', label: 'Правила', Icon: GavelOutlinedIcon },
 ]
 
 const navItemsBottom: readonly NavItem[] = [

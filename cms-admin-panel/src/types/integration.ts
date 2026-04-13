@@ -21,3 +21,36 @@ export type IntegrationChangeHistoryPage = {
   items: IntegrationChangeHistoryEntry[]
   hasMore: boolean
 }
+
+export type IntegrationMappingRule = {
+  from: string
+  to: string
+  transform?: string
+}
+
+export type IntegrationDetails = {
+  id: string
+  number: number
+  name: string
+  integrationKind: 'pull' | 'push' | 'broker'
+  endpointUrl: string
+  riskObjectModelId: string
+  mapping_rules: IntegrationMappingRule[]
+  status: IntegrationConfigStatus
+  authorName: string
+  updatedAt: string
+}
+
+export type IntegrationUpdatePayload = {
+  name: string
+  integrationKind: 'pull' | 'push' | 'broker'
+  endpointUrl: string
+  riskObjectModelId: string
+  mapping_rules: IntegrationMappingRule[]
+  status: IntegrationConfigStatus
+}
+
+export type IntegrationUpdateResponse = {
+  id: string
+  savedAt: string
+}

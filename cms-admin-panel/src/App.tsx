@@ -4,11 +4,14 @@ import { AuthProvider } from './auth/AuthContext'
 import { AdminLayout } from './layout/AdminLayout'
 import { DashboardPage } from './pages/DashboardPage'
 import { IntegrationCreatePage } from './pages/IntegrationCreatePage'
+import { IntegrationDetailsPage } from './pages/IntegrationDetailsPage'
 import { IntegrationPage } from './pages/IntegrationPage'
 import { LoginPage } from './pages/LoginPage'
 import { ProfilePage } from './pages/ProfilePage'
 import { RiskObjectCreatePage } from './pages/RiskObjectCreatePage'
+import { RiskObjectDetailsPage } from './pages/RiskObjectDetailsPage'
 import { RiskObjectsPage } from './pages/RiskObjectsPage'
+import { RulesPage } from './pages/RulesPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { UsersPage } from './pages/UsersPage'
 import { RequireAuth } from './routes/RequireAuth'
@@ -28,9 +31,12 @@ function App() {
                 <Route path="dashboard" element={<DashboardPage />} />
                 <Route path="users" element={<UsersPage />} />
                 <Route path="risk-objects/new" element={<RiskObjectCreatePage />} />
+                <Route path="risk-objects/:id" element={<RiskObjectDetailsPage />} />
                 <Route path="risk-objects" element={<RiskObjectsPage />} />
+                <Route path="rules" element={<RulesPage />} />
                 <Route path="settings" element={<SettingsPage />} />
                 <Route path="integration/new" element={<IntegrationCreatePage />} />
+                <Route path="integration/:id" element={<IntegrationDetailsPage />} />
                 <Route path="integration" element={<IntegrationPage />} />
                 <Route path="profile" element={<ProfilePage />} />
               </Route>

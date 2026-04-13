@@ -1,8 +1,8 @@
 import AddIcon from '@mui/icons-material/Add'
 import ClearIcon from '@mui/icons-material/Clear'
-import EditOutlinedIcon from '@mui/icons-material/EditOutlined'
 import FilterListIcon from '@mui/icons-material/FilterList'
 import SearchIcon from '@mui/icons-material/Search'
+import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined'
 import {
   Alert,
   Box,
@@ -249,12 +249,12 @@ export function IntegrationPage() {
                       <Button
                         size="small"
                         variant="outlined"
-                        startIcon={<EditOutlinedIcon fontSize="small" />}
+                        startIcon={<VisibilityOutlinedIcon fontSize="small" />}
                         onClick={() => {
-                          /* заглушка: экран редактирования позже */
+                          navigate(`/app/integration/${row.id}`)
                         }}
                       >
-                        Изменить
+                        Просмотреть
                       </Button>
                     </TableCell>
                   </TableRow>

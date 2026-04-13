@@ -4,6 +4,7 @@ import {
   Button,
   CircularProgress,
   Container,
+  Link,
   Paper,
   Stack,
   TextField,
@@ -17,6 +18,7 @@ export function LoginPage() {
   const { login, user, loading } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
+  const mainAppUrl = (import.meta.env.VITE_MAIN_APP_URL ?? '').trim() || '/'
   const from =
     (location.state as { from?: string } | null)?.from ?? '/app/dashboard'
 
@@ -61,6 +63,7 @@ export function LoginPage() {
   return (
     <Box
       sx={{
+        position: 'relative',
         minHeight: '100vh',
         display: 'flex',
         alignItems: 'center',
@@ -69,6 +72,18 @@ export function LoginPage() {
         px: 2,
       }}
     >
+      <Link
+        href={mainAppUrl}
+        underline="hover"
+        sx={{
+          position: 'absolute',
+          top: 16,
+          left: 16,
+          fontWeight: 500,
+        }}
+      >
+        Перейти в основное приложение
+      </Link>
       <Container maxWidth="sm">
         <Paper elevation={0} sx={{ p: 4, border: 1, borderColor: 'divider' }}>
           <Stack spacing={2} sx={{ mb: 3 }}>
