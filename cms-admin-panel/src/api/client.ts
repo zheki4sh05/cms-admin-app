@@ -21,6 +21,7 @@ import type {
   RiskObjectUpdateResponse,
 } from '../types/riskObjects'
 import type { RiskObjectModel, RiskObjectModelListItem } from '../types/integrationDraft'
+import type { RiskItem } from '../types/risks'
 
 const COMPANY_ID_STORAGE_KEY = 'trustflow_company_id'
 
@@ -368,6 +369,20 @@ export async function getRiskObjects(
     items: (data.items ?? []) as RiskObject[],
     hasMore: Boolean(data.hasMore),
   }
+}
+
+export async function getRisks(token: string): Promise<RiskItem[]> {
+  const res = await fetch(apiUrl('risks'), {
+    headers: authHeaders(token),
+  })
+  const data = (await res.json().catch(() => ({}))) as {
+    message?: string
+    items?: RiskItem[]
+  }
+  if (!res.ok) {
+    throw new Error(data.message ?? 'Не удалось загрузить риски')
+  }
+  return data.items ?? []
 }
 
 export async function getRiskObjectModels(token: string): Promise<RiskObjectModelListItem[]> {

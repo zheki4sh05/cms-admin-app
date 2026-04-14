@@ -44,7 +44,7 @@ const navItemsMain: readonly NavItem[] = [
   { to: '/app/users', label: 'Пользователи', Icon: PeopleOutlinedIcon },
   { to: '/app/risk-objects', label: 'Рисковые объекты', Icon: ShieldOutlinedIcon },
   { to: '/app/integration', label: 'Интеграция', Icon: HubOutlinedIcon },
-  { to: '/app/rules', label: 'Правила', Icon: GavelOutlinedIcon },
+  { to: '/app/rules', label: 'Риски', Icon: GavelOutlinedIcon },
 ]
 
 const navItemsBottom: readonly NavItem[] = [

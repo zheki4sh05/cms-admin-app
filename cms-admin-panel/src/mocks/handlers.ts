@@ -333,6 +333,51 @@ let mockRiskObjects = [
   },
 ]
 
+const mockRisks = [
+  {
+    id: 'risk-1',
+    category: 'financial' as const,
+    name: 'Падение платёжной дисциплины',
+    description: 'Клиент систематически задерживает оплату, что увеличивает кассовый разрыв.',
+    riskObjectId: 'ro-1',
+  },
+  {
+    id: 'risk-2',
+    category: 'financial' as const,
+    name: 'Высокая долговая нагрузка',
+    description: 'У контрагента растёт отношение долга к выручке по последним отчётам.',
+    riskObjectId: 'ro-4',
+  },
+  {
+    id: 'risk-3',
+    category: 'reputational' as const,
+    name: 'Негативный новостной фон',
+    description: 'В публичных источниках появились сведения о судебных претензиях и нарушениях.',
+    riskObjectId: 'ro-3',
+  },
+  {
+    id: 'risk-4',
+    category: 'reputational' as const,
+    name: 'Жалобы ключевых партнёров',
+    description: 'Зафиксированы повторные жалобы на срыв сроков и качество взаимодействия.',
+    riskObjectId: 'ro-5',
+  },
+  {
+    id: 'risk-5',
+    category: 'operational' as const,
+    name: 'Сбой в интеграции данных',
+    description: 'При обмене с внешней системой часть записей теряется или приходит с задержкой.',
+    riskObjectId: 'ro-2',
+  },
+  {
+    id: 'risk-6',
+    category: 'operational' as const,
+    name: 'Ограниченный кадровый резерв',
+    description: 'Критичные процессы зависят от узкого круга сотрудников без резервного покрытия.',
+    riskObjectId: 'ro-6',
+  },
+]
+
 const RO_HISTORY_TEMPLATES = [
   {
     riskObjectName: 'ООО «Вектор»',
@@ -683,6 +728,15 @@ export const handlers = [
       return HttpResponse.json({ message: 'Модель не найдена' }, { status: 404 })
     }
     return HttpResponse.json({ id: row.id, name: row.name, definition: row.definition })
+  }),
+
+  http.get('/api/risks', async ({ request }) => {
+    await delay(220)
+    const token = parseAuth(request)
+    if (token !== MOCK_TOKEN) {
+      return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
+    }
+    return HttpResponse.json({ items: mockRisks })
   }),
 
   http.post('/api/risk-objects', async ({ request }) => {
