@@ -27,6 +27,13 @@ export function LoginPage() {
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
+  const demoCredentials = [
+    { role: 'Супер-пользователь (admin)', email: 'admin@trustflow.local', password: 'admin123' },
+    { role: 'Менеджер', email: 'manager@trustflow.local', password: 'manager123' },
+    { role: 'Руководитель', email: 'head@trustflow.local', password: 'head123' },
+    { role: 'ТОП-менеджмент', email: 'top@trustflow.local', password: 'top123' },
+  ] as const
+
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     setError(null)
@@ -117,8 +124,20 @@ export function LoginPage() {
                 onChange={(e) => setPassword(e.target.value)}
                 fullWidth
                 required
-                helperText="Демо: пароль admin123"
+                helperText="Используйте данные из блока «Демо-аккаунты» ниже"
               />
+              <Alert severity="info" sx={{ alignItems: 'flex-start' }}>
+                <Typography variant="subtitle2" sx={{ mb: 0.75 }}>
+                  Демо-аккаунты
+                </Typography>
+                <Stack spacing={0.5}>
+                  {demoCredentials.map((item) => (
+                    <Typography key={item.email} variant="body2">
+                      {item.role}: <strong>{item.email}</strong> / <strong>{item.password}</strong>
+                    </Typography>
+                  ))}
+                </Stack>
+              </Alert>
               <Button
                 type="submit"
                 variant="contained"

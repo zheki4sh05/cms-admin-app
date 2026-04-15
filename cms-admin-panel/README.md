@@ -1,73 +1,93 @@
-# React + TypeScript + Vite
+# CMS Admin Panel
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Админ-панель для управления пользователями, рисковыми объектами, правилами и интеграциями в системе Trustflow.
 
-Currently, two official plugins are available:
+Проект построен на `React + TypeScript + Vite`, использует `MUI` для UI и поддерживает два основных режима:
+- локальная разработка с моками (`MSW`);
+- работа с реальным backend API.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Что умеет приложение
 
-## React Compiler
+- аутентификация и авторизация с учётом прав доступа;
+- dashboard и управление пользователями;
+- работа с рисковыми объектами, правилами и категориями рисков;
+- управление интеграциями и просмотр истории изменений;
+- настройки профиля и системные настройки.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Требования
 
-## Expanding the ESLint configuration
+- `Node.js` 20+ (рекомендуется LTS);
+- `npm` 10+.
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+## Быстрый старт!
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm install
+npm run dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+После запуска приложение откроется автоматически (Vite настроен с `open: true`).
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## Демо-вход (режим с моками)
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+По умолчанию для разработки включён `MSW`, поэтому можно зайти без backend:
+
+- `admin@trustflow.local` / `admin123`
+- `manager@trustflow.local` / `manager123`
+- `head@trustflow.local` / `head123`
+- `top@trustflow.local` / `top123`
+
+## Скрипты
+
+- `npm run dev` — запуск в режиме `dev` (MSW включён).
+- `npm run dev:test` — запуск в режиме `test` (MSW выключен, реальный API).
+- `npm run build` — production-сборка (`tsc -b && vite build`).
+- `npm run build:test` — test-сборка.
+- `npm run preview` — локальный просмотр production-сборки в режиме `dev`.
+- `npm run preview:test` — просмотр сборки в режиме `test`.
+- `npm run lint` — проверка ESLint.
+
+## Переменные окружения
+
+Проект использует разные `.env`-файлы по режимам:
+
+- `.env.dev`
+- `.env.development`
+- `.env.test`
+- `.env.production`
+
+Ключевые переменные:
+
+- `VITE_USE_MSW` — включить/выключить моки (`true/false`);
+- `VITE_API_BASE_URL` — базовый URL API (например `/api` или `http://localhost:3000/api`);
+- `VITE_MAIN_APP_URL` — ссылка на основное приложение (кнопка на странице логина).
+
+Пример запуска с реальным backend:
+
+```bash
+npm run dev:test
 ```
+
+Перед этим проверьте значения в `.env.test`.
+
+## Сборка и деплой
+
+Собрать production-версию:
+
+```bash
+npm run build
+```
+
+Артефакты сборки появятся в директории `dist/`.
+
+Проверить собранную версию локально:
+
+```bash
+npm run preview
+```
+
+## Полезно при разработке
+
+- Если нужно сбросить текущую сессию, удалите токен в `localStorage` (`trustflow_access_token`).
+- При работе с backend убедитесь, что `VITE_API_BASE_URL` указывает на доступный API.
+- Если интерфейс недоступен, проверьте консоль браузера и `npm run lint`.
