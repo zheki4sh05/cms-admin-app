@@ -21,7 +21,13 @@ import type {
   RiskObjectUpdateResponse,
 } from '../types/riskObjects'
 import type { RiskObjectModel, RiskObjectModelListItem } from '../types/integrationDraft'
-import type { RiskItem } from '../types/risks'
+import type {
+  RiskCreatePayload,
+  RiskCreateResponse,
+  RiskItem,
+  RuleChangeHistoryPage,
+} from '../types/risks'
+import type { AccessPermission } from '../types/permissions'
 
 const COMPANY_ID_STORAGE_KEY = 'trustflow_company_id'
 
@@ -80,6 +86,20 @@ export async function getMe(token: string) {
     throw new Error(data.message ?? 'Ошибка загрузки профиля')
   }
   return data
+}
+
+export async function getMyPermissions(token: string): Promise<AccessPermission[]> {
+  const res = await fetch(apiUrl('me/permissions'), {
+    headers: authHeaders(token),
+  })
+  const data = (await res.json().catch(() => ({}))) as {
+    message?: string
+    items?: AccessPermission[]
+  }
+  if (!res.ok) {
+    throw new Error(data.message ?? 'Ошибка загрузки прав доступа')
+  }
+  return data.items ?? []
 }
 
 export async function getDashboardSummary(token: string) {
@@ -283,6 +303,43 @@ export async function getUsersList(token: string) {
   return data.items ?? []
 }
 
+export async function getUserAccessPermissions(
+  token: string,
+  userId: string,
+): Promise<AccessPermission[]> {
+  const res = await fetch(apiUrl(`users/${userId}/access`), {
+    headers: authHeaders(token),
+  })
+  const data = (await res.json().catch(() => ({}))) as {
+    message?: string
+    accessPermissions?: AccessPermission[]
+  }
+  if (!res.ok) {
+    throw new Error(data.message ?? 'Не удалось загрузить доступы пользователя')
+  }
+  return data.accessPermissions ?? []
+}
+
+export async function putUserAccessPermissions(
+  token: string,
+  userId: string,
+  accessPermissions: AccessPermission[],
+): Promise<AccessPermission[]> {
+  const res = await fetch(apiUrl(`users/${userId}/access`), {
+    method: 'PUT',
+    headers: authHeaders(token),
+    body: JSON.stringify({ accessPermissions }),
+  })
+  const data = (await res.json().catch(() => ({}))) as {
+    message?: string
+    accessPermissions?: AccessPermission[]
+  }
+  if (!res.ok) {
+    throw new Error(data.message ?? 'Не удалось сохранить доступы пользователя')
+  }
+  return data.accessPermissions ?? []
+}
+
 export async function getSettings(token: string) {
   const res = await fetch(apiUrl('settings'), {
     headers: authHeaders(token),
@@ -383,6 +440,63 @@ export async function getRisks(token: string): Promise<RiskItem[]> {
     throw new Error(data.message ?? 'Не удалось загрузить риски')
   }
   return data.items ?? []
+}
+
+export async function postRiskCreate(
+  token: string,
+  payload: RiskCreatePayload,
+): Promise<RiskCreateResponse> {
+  const res = await fetch(apiUrl('risks'), {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: JSON.stringify(payload),
+  })
+  const data = (await res.json().catch(() => ({}))) as {
+    message?: string
+    id?: string
+    savedAt?: string
+  }
+  if (!res.ok) {
+    throw new Error(data.message ?? 'Не удалось создать правило риска')
+  }
+  if (!data.id || !data.savedAt) {
+    throw new Error('Некорректный ответ сервера')
+  }
+  return { id: data.id, savedAt: data.savedAt }
+}
+
+export async function getRulesChangeHistory(
+  token: string,
+  page: number,
+  pageSize: number,
+  options?: IntegrationChangeHistoryQuery,
+): Promise<RuleChangeHistoryPage> {
+  const params = new URLSearchParams({
+    page: String(page),
+    pageSize: String(pageSize),
+  })
+  const trimmed = options?.q?.trim()
+  if (trimmed) params.set('q', trimmed)
+  if (options?.filters) {
+    for (const [key, value] of Object.entries(options.filters)) {
+      if (value) params.set(key, value)
+    }
+  }
+  const res = await fetch(`${apiUrl('rules/change-history')}?${params.toString()}`, {
+    headers: authHeaders(token),
+  })
+  const data = (await res.json().catch(() => ({}))) as {
+    message?: string
+    items?: RuleChangeHistoryPage['items']
+    hasMore?: boolean
+  }
+  if (!res.ok) {
+    throw new Error(data.message ?? 'Не удалось загрузить историю')
+  }
+  return {
+    items: data.items ?? [],
+    hasMore: Boolean(data.hasMore),
+  }
 }
 
 export async function getRiskObjectModels(token: string): Promise<RiskObjectModelListItem[]> {

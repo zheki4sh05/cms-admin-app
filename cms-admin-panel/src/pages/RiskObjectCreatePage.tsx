@@ -201,7 +201,8 @@ function downloadJsonFile(filename: string, jsonText: string) {
 
 export function RiskObjectCreatePage() {
   const navigate = useNavigate()
-  const { token } = useAuth()
+  const { token, hasPermission } = useAuth()
+  const canManageRiskObjects = hasPermission('manage_risk_objects')
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const [objectName, setObjectName] = useState('')
@@ -249,6 +250,10 @@ export function RiskObjectCreatePage() {
       showToast({ severity: 'error', text: 'Нет сессии — войдите снова.' })
       return
     }
+    if (!canManageRiskObjects) {
+      showToast({ severity: 'error', text: 'Недостаточно прав для редактирования' })
+      return
+    }
     setSaveLoading(true)
     try {
       const payload: RiskObjectCreatePayload = {
@@ -265,7 +270,7 @@ export function RiskObjectCreatePage() {
     } finally {
       setSaveLoading(false)
     }
-  }, [token, objectName, rootFields, showToast])
+  }, [token, canManageRiskObjects, objectName, rootFields, showToast])
 
   const confirmClear = useCallback(() => {
     setObjectName('')
@@ -443,6 +448,7 @@ export function RiskObjectCreatePage() {
             variant="outlined"
             startIcon={<FileDownloadOutlinedIcon />}
             onClick={handleExport}
+            disabled={!canManageRiskObjects}
           >
             Экспорт
           </Button>
@@ -451,7 +457,7 @@ export function RiskObjectCreatePage() {
             variant="contained"
             startIcon={<SaveOutlinedIcon />}
             onClick={() => void handleSave()}
-            disabled={saveLoading || !token}
+            disabled={saveLoading || !token || !canManageRiskObjects}
           >
             Сохранить
           </Button>
@@ -461,6 +467,7 @@ export function RiskObjectCreatePage() {
             color="warning"
             startIcon={<ClearAllOutlinedIcon />}
             onClick={() => setClearDialogOpen(true)}
+            disabled={!canManageRiskObjects}
           >
             Очистить
           </Button>
@@ -469,6 +476,7 @@ export function RiskObjectCreatePage() {
             variant="outlined"
             startIcon={<UploadFileOutlinedIcon />}
             onClick={() => fileInputRef.current?.click()}
+            disabled={!canManageRiskObjects}
           >
             Импорт
           </Button>
@@ -481,6 +489,11 @@ export function RiskObjectCreatePage() {
           />
         </Stack>
       </Box>
+      {!canManageRiskObjects ? (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          Доступен только просмотр страницы. Создание и редактирование рисковых объектов отключено.
+        </Alert>
+      ) : null}
 
       <Dialog open={clearDialogOpen} onClose={() => setClearDialogOpen(false)}>
         <DialogTitle>Очистить конструктор?</DialogTitle>
@@ -513,6 +526,7 @@ export function RiskObjectCreatePage() {
             onChange={(e) => setObjectName(e.target.value)}
             fullWidth
             autoComplete="off"
+            disabled={!canManageRiskObjects}
             helperText="В превью и в экспорте наименование не входит в JSON — только в имя файла. При импорте поле заполняется из имени файла (без .json). На сервер наименование уходит отдельно от структуры."
           />
 
@@ -530,6 +544,7 @@ export function RiskObjectCreatePage() {
               startIcon={<AddIcon />}
               onClick={addRootField}
               sx={{ mb: 2 }}
+              disabled={!canManageRiskObjects}
             >
               Добавить ключ
             </Button>
@@ -562,12 +577,14 @@ export function RiskObjectCreatePage() {
                           placeholder={`ключ_${index + 1}`}
                           autoComplete="off"
                           required
+                          disabled={!canManageRiskObjects}
                         />
                         <IconButton
                           aria-label="Удалить поле"
                           color="error"
                           onClick={() => removeRootField(field.id)}
                           sx={{ mt: 0.5 }}
+                          disabled={!canManageRiskObjects}
                         >
                           <DeleteOutlinedIcon />
                         </IconButton>
@@ -583,6 +600,7 @@ export function RiskObjectCreatePage() {
                           onChange={(e) =>
                             setRootValueKind(field.id, e.target.value as ValueKind)
                           }
+                          disabled={!canManageRiskObjects}
                         >
                           <MenuItem value="text">Простой текст</MenuItem>
                           <MenuItem value="array">Массив</MenuItem>
@@ -629,6 +647,7 @@ export function RiskObjectCreatePage() {
                                     size="small"
                                     aria-label="Удалить объект из массива"
                                     onClick={() => removeArrayRow(field.id, row.id)}
+                                    disabled={!canManageRiskObjects}
                                   >
                                     <DeleteOutlinedIcon fontSize="small" />
                                   </IconButton>
@@ -659,6 +678,7 @@ export function RiskObjectCreatePage() {
                                         fullWidth
                                         sx={{ flex: '1 1 200px', minWidth: 0 }}
                                         autoComplete="off"
+                                        disabled={!canManageRiskObjects}
                                       />
                                       <IconButton
                                         size="small"
@@ -671,6 +691,7 @@ export function RiskObjectCreatePage() {
                                           )
                                         }
                                         sx={{ mt: 0.25 }}
+                                        disabled={!canManageRiskObjects}
                                       >
                                         <DeleteOutlinedIcon fontSize="small" />
                                       </IconButton>
@@ -682,6 +703,7 @@ export function RiskObjectCreatePage() {
                                   startIcon={<AddIcon />}
                                   onClick={() => addFieldKeyToArrayRow(field.id, row.id)}
                                   sx={{ mt: 1 }}
+                                  disabled={!canManageRiskObjects}
                                 >
                                   Добавить ключ поля
                                 </Button>
@@ -694,6 +716,7 @@ export function RiskObjectCreatePage() {
                             startIcon={<AddIcon />}
                             onClick={() => addArrayRow(field.id)}
                             sx={{ mt: 1.5 }}
+                            disabled={!canManageRiskObjects}
                           >
                             Добавить элемент массива
                           </Button>

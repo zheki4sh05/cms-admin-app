@@ -88,6 +88,11 @@ export function saveRuleOverride(ruleId: string, override: RuleOverrides) {
   window.localStorage.setItem(RULE_OVERRIDES_STORAGE_KEY, JSON.stringify(all))
 }
 
+export function replaceRuleOverrides(overrides: RuleOverridesMap) {
+  if (typeof window === 'undefined') return
+  window.localStorage.setItem(RULE_OVERRIDES_STORAGE_KEY, JSON.stringify(overrides))
+}
+
 export function loadRiskCategories(): RiskCategoryOption[] {
   if (typeof window === 'undefined') return SYSTEM_RISK_CATEGORIES
   const raw = window.localStorage.getItem(RISK_CATEGORIES_STORAGE_KEY)

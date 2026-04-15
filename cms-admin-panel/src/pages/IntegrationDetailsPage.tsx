@@ -135,8 +135,9 @@ export function IntegrationDetailsPage() {
   const navigate = useNavigate()
   const { id = '' } = useParams()
   const [searchParams] = useSearchParams()
-  const { token } = useAuth()
+  const { token, hasPermission } = useAuth()
   const isReadOnlyView = searchParams.get('readonly') === '1'
+  const canManageIntegrations = hasPermission('manage_integrations')
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -144,7 +145,7 @@ export function IntegrationDetailsPage() {
   const [saving, setSaving] = useState(false)
   const [statusUpdating, setStatusUpdating] = useState(false)
   const [clearDialogOpen, setClearDialogOpen] = useState(false)
-  const canEdit = editingEnabled && !isReadOnlyView
+  const canEdit = editingEnabled && !isReadOnlyView && canManageIntegrations
 
   const [number, setNumber] = useState(0)
   const [authorName, setAuthorName] = useState('')
@@ -310,7 +311,7 @@ export function IntegrationDetailsPage() {
   }, [initialSnapshot, setFromSnapshot, showToast])
 
   const handleSave = useCallback(async () => {
-    if (isReadOnlyView) return
+    if (isReadOnlyView || !canManageIntegrations) return
     if (!token || !id) {
       showToast({ severity: 'error', text: 'Нет сессии — войдите снова.' })
       return
@@ -348,6 +349,7 @@ export function IntegrationDetailsPage() {
     }
   }, [
     isReadOnlyView,
+    canManageIntegrations,
     token,
     id,
     name,
@@ -361,7 +363,7 @@ export function IntegrationDetailsPage() {
 
   const handleStatusSwitch = useCallback(
     async (checked: boolean) => {
-      if (isReadOnlyView) return
+      if (isReadOnlyView || !canManageIntegrations) return
       if (!token || !id) {
         showToast({ severity: 'error', text: 'Нет сессии — войдите снова.' })
         return
@@ -397,7 +399,7 @@ export function IntegrationDetailsPage() {
         setStatusUpdating(false)
       }
     },
-    [isReadOnlyView, token, id, status, showToast],
+    [isReadOnlyView, canManageIntegrations, token, id, status, showToast],
   )
 
   const handleExport = useCallback(() => {
@@ -467,6 +469,10 @@ export function IntegrationDetailsPage() {
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
           Страница открыта в режиме просмотра: редактирование отключено.
         </Typography>
+      ) : !canManageIntegrations ? (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          Доступен только просмотр страницы. Редактирование интеграции отключено.
+        </Alert>
       ) : (
         <FormControlLabel
           sx={{ mb: 2 }}
@@ -554,7 +560,7 @@ export function IntegrationDetailsPage() {
               <Switch
                 checked={status === 'active'}
                 onChange={(e) => void handleStatusSwitch(e.target.checked)}
-                disabled={statusUpdating || saving || isReadOnlyView}
+                disabled={statusUpdating || saving || isReadOnlyView || !canManageIntegrations}
               />
             }
             label={

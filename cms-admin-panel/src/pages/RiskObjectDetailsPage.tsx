@@ -15,6 +15,7 @@ import {
   DialogTitle,
   FormControl,
   FormControlLabel,
+  InputLabel,
   FormLabel,
   IconButton,
   MenuItem,
@@ -25,6 +26,12 @@ import {
   Snackbar,
   Stack,
   Switch,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
   TextField,
   Typography,
 } from '@mui/material'
@@ -32,15 +39,28 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { SyntheticEvent } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
+  getRisks,
   getRiskObjectById,
   putRiskObjectById,
   putRiskObjectStatusById,
 } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
+import type { RiskItem } from '../types/risks'
 import type {
   RiskObjectStatusUpdatePayload,
   RiskObjectUpdatePayload,
 } from '../types/riskObjects'
+import {
+  buildRuleRows,
+  loadRiskCategories,
+  loadRuleOverrides,
+  priorityLabels,
+  replaceRuleOverrides,
+  saveRuleOverride,
+  type RiskCategoryOption,
+  type RuleOverridesMap,
+  type RuleTableRow,
+} from './rulesShared'
 
 function newId() {
   return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`
@@ -161,8 +181,9 @@ export function RiskObjectDetailsPage() {
   const navigate = useNavigate()
   const { id = '' } = useParams()
   const [searchParams] = useSearchParams()
-  const { token } = useAuth()
+  const { token, hasPermission } = useAuth()
   const isReadOnlyView = searchParams.get('readonly') === '1'
+  const canManageRiskObjects = hasPermission('manage_risk_objects')
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -173,7 +194,7 @@ export function RiskObjectDetailsPage() {
   const [saveDialogOpen, setSaveDialogOpen] = useState(false)
   const [saveComment, setSaveComment] = useState('')
   const [saveCommentError, setSaveCommentError] = useState(false)
-  const canEdit = editingEnabled && !isReadOnlyView
+  const canEdit = editingEnabled && !isReadOnlyView && canManageRiskObjects
 
   const [name, setName] = useState('')
   const [code, setCode] = useState('')
@@ -181,6 +202,15 @@ export function RiskObjectDetailsPage() {
   const [updatedAt, setUpdatedAt] = useState('')
   const [rootFields, setRootFields] = useState<RootField[]>([])
   const [initialSnapshot, setInitialSnapshot] = useState<RiskEditorSnapshot | null>(null)
+  const [risks, setRisks] = useState<RiskItem[]>([])
+  const [risksLoading, setRisksLoading] = useState(true)
+  const [risksError, setRisksError] = useState<string | null>(null)
+  const [riskCategories] = useState<RiskCategoryOption[]>(() => loadRiskCategories())
+  const [ruleOverrides, setRuleOverrides] = useState<RuleOverridesMap>(() => loadRuleOverrides())
+  const [initialRuleOverrides, setInitialRuleOverrides] = useState<RuleOverridesMap>(() =>
+    loadRuleOverrides(),
+  )
+  const [riskToLinkId, setRiskToLinkId] = useState('')
 
   type OperationToast = { severity: 'success' | 'error'; text: string }
   const [toast, setToast] = useState<OperationToast | null>(null)
@@ -233,6 +263,34 @@ export function RiskObjectDetailsPage() {
     }
   }, [token, id])
 
+  useEffect(() => {
+    if (!token) return
+    let cancelled = false
+    setRisksLoading(true)
+    setRisksError(null)
+    getRisks(token)
+      .then((items) => {
+        if (cancelled) return
+        setRisks(items)
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return
+        setRisksError(e instanceof Error ? e.message : 'Не удалось загрузить список рисков')
+      })
+      .finally(() => {
+        if (!cancelled) setRisksLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [token])
+
+  useEffect(() => {
+    const overrides = loadRuleOverrides()
+    setRuleOverrides(overrides)
+    setInitialRuleOverrides(overrides)
+  }, [id])
+
   const previewJson = useMemo(() => {
     try {
       return JSON.stringify(buildPayloadObject(rootFields), null, 2)
@@ -240,6 +298,59 @@ export function RiskObjectDetailsPage() {
       return '{}'
     }
   }, [rootFields])
+
+  const linkedRules = useMemo<RuleTableRow[]>(() => {
+    if (!id) return []
+    const rows = buildRuleRows(risks, ruleOverrides, riskCategories)
+    return rows.filter((row) => row.riskObjectId === id)
+  }, [id, risks, ruleOverrides, riskCategories])
+
+  const availableRules = useMemo<RuleTableRow[]>(() => {
+    if (!id) return []
+    const rows = buildRuleRows(risks, ruleOverrides, riskCategories)
+    return rows.filter((row) => row.riskObjectId !== id)
+  }, [id, risks, ruleOverrides, riskCategories])
+
+  const updateRuleRiskLink = useCallback(
+    (ruleId: string, riskObjectId: string) => {
+      setRuleOverrides((prev) => {
+        const nextOverride = {
+          ...(prev[ruleId] ?? {}),
+          riskObjectId,
+        }
+        saveRuleOverride(ruleId, nextOverride)
+        return {
+          ...prev,
+          [ruleId]: nextOverride,
+        }
+      })
+    },
+    [],
+  )
+
+  const handleLinkRisk = useCallback(() => {
+    if (!id || !riskToLinkId) return
+    updateRuleRiskLink(riskToLinkId, id)
+    const linkedRule = availableRules.find((row) => row.id === riskToLinkId)
+    showToast({
+      severity: 'success',
+      text: linkedRule
+        ? `Риск «${linkedRule.name}» привязан к объекту`
+        : 'Риск привязан к объекту',
+    })
+    setRiskToLinkId('')
+  }, [id, riskToLinkId, updateRuleRiskLink, availableRules, showToast])
+
+  const handleUnlinkRisk = useCallback(
+    (rule: RuleTableRow) => {
+      updateRuleRiskLink(rule.id, '')
+      showToast({
+        severity: 'success',
+        text: `Связь с риском «${rule.name}» удалена`,
+      })
+    },
+    [updateRuleRiskLink, showToast],
+  )
 
   const setFromSnapshot = useCallback((snapshot: RiskEditorSnapshot) => {
     const clonedFields = snapshot.rootFields.map((f) => ({
@@ -261,12 +372,15 @@ export function RiskObjectDetailsPage() {
   const handleReset = useCallback(() => {
     if (!initialSnapshot) return
     setFromSnapshot(initialSnapshot)
+    setRuleOverrides(initialRuleOverrides)
+    replaceRuleOverrides(initialRuleOverrides)
+    setRiskToLinkId('')
     setEditingEnabled(false)
     showToast({ severity: 'success', text: 'Изменения сброшены.' })
-  }, [initialSnapshot, setFromSnapshot, showToast])
+  }, [initialSnapshot, setFromSnapshot, initialRuleOverrides, showToast])
 
   const handleSave = useCallback(async () => {
-    if (isReadOnlyView) return
+    if (isReadOnlyView || !canManageRiskObjects) return
     if (!token || !id) {
       showToast({ severity: 'error', text: 'Нет сессии — войдите снова.' })
       return
@@ -306,11 +420,22 @@ export function RiskObjectDetailsPage() {
     } finally {
       setSaving(false)
     }
-  }, [isReadOnlyView, token, id, name, rootFields, code, status, saveComment, showToast])
+  }, [
+    isReadOnlyView,
+    canManageRiskObjects,
+    token,
+    id,
+    name,
+    rootFields,
+    code,
+    status,
+    saveComment,
+    showToast,
+  ])
 
   const handleStatusSwitch = useCallback(
     async (checked: boolean) => {
-      if (isReadOnlyView) return
+      if (isReadOnlyView || !canManageRiskObjects) return
       if (!token || !id) {
         showToast({ severity: 'error', text: 'Нет сессии — войдите снова.' })
         return
@@ -349,7 +474,7 @@ export function RiskObjectDetailsPage() {
         setStatusUpdating(false)
       }
     },
-    [isReadOnlyView, token, id, status, rootFields, showToast],
+    [isReadOnlyView, canManageRiskObjects, token, id, status, rootFields, showToast],
   )
 
   const handleExport = useCallback(() => {
@@ -529,6 +654,10 @@ export function RiskObjectDetailsPage() {
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
           Страница открыта в режиме просмотра: редактирование отключено.
         </Typography>
+      ) : !canManageRiskObjects ? (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          Доступен только просмотр страницы. Редактирование рискового объекта отключено.
+        </Alert>
       ) : (
         <FormControlLabel
           sx={{ mb: 2 }}
@@ -619,7 +748,7 @@ export function RiskObjectDetailsPage() {
               <Switch
                 checked={status === 'active'}
                 onChange={(e) => void handleStatusSwitch(e.target.checked)}
-                disabled={statusUpdating || saving || isReadOnlyView}
+                disabled={statusUpdating || saving || isReadOnlyView || !canManageRiskObjects}
               />
             }
             label={
@@ -742,6 +871,113 @@ export function RiskObjectDetailsPage() {
                 ))}
               </Stack>
             )}
+          </Box>
+
+          <Box>
+            <Typography variant="subtitle1" sx={{ mb: 0.5 }}>
+              Связанные риски
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+              Краткий список рисков, которые относятся к текущему рисковому объекту.
+            </Typography>
+            <Stack
+              direction={{ xs: 'column', md: 'row' }}
+              spacing={1}
+              sx={{ mb: 1.5 }}
+              alignItems={{ md: 'center' }}
+            >
+              <FormControl size="small" sx={{ minWidth: { xs: '100%', md: 420 } }}>
+                <InputLabel id="link-risk-label">Добавить риск</InputLabel>
+                <Select
+                  labelId="link-risk-label"
+                  label="Добавить риск"
+                  value={riskToLinkId}
+                  onChange={(e) => setRiskToLinkId(e.target.value)}
+                  disabled={!canEdit || risksLoading || availableRules.length === 0}
+                >
+                  {availableRules.map((row) => (
+                    <MenuItem key={row.id} value={row.id}>
+                      {row.name} ({row.categoryLabel})
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <Button
+                variant="contained"
+                onClick={handleLinkRisk}
+                disabled={!canEdit || !riskToLinkId}
+              >
+                Добавить
+              </Button>
+            </Stack>
+            {risksError ? (
+              <Alert severity="error" sx={{ mb: 1.5 }}>
+                {risksError}
+              </Alert>
+            ) : null}
+            <TableContainer component={Paper} variant="outlined">
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>ID риска</TableCell>
+                    <TableCell>Название риска</TableCell>
+                    <TableCell>Категория</TableCell>
+                    <TableCell>Приоритет</TableCell>
+                    <TableCell>Статус</TableCell>
+                    <TableCell align="right">Действие</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {risksLoading ? (
+                    <TableRow>
+                      <TableCell colSpan={6}>
+                        <Box sx={{ py: 2, display: 'flex', justifyContent: 'center' }}>
+                          <CircularProgress size={24} />
+                        </Box>
+                      </TableCell>
+                    </TableRow>
+                  ) : linkedRules.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={6}>
+                        <Typography variant="body2" color="text.secondary">
+                          Для этого рискового объекта риски не найдены.
+                        </Typography>
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    linkedRules.map((row) => (
+                      <TableRow key={row.id} hover>
+                        <TableCell>{row.id}</TableCell>
+                        <TableCell>{row.name}</TableCell>
+                        <TableCell>{row.categoryLabel}</TableCell>
+                        <TableCell>{priorityLabels[row.priority]}</TableCell>
+                        <TableCell>{row.enabled ? 'Активно' : 'Отключено'}</TableCell>
+                        <TableCell align="right">
+                          <Stack direction="row" spacing={1} justifyContent="flex-end">
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              onClick={() => navigate(`/app/rules/${row.id}`)}
+                            >
+                              Подробнее
+                            </Button>
+                            <Button
+                              size="small"
+                              color="error"
+                              variant="outlined"
+                              onClick={() => handleUnlinkRisk(row)}
+                              disabled={!canEdit}
+                            >
+                              Убрать
+                            </Button>
+                          </Stack>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </TableContainer>
           </Box>
         </Stack>
 

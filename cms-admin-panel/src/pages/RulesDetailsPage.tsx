@@ -1,4 +1,5 @@
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
+import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined'
 import {
   Alert,
   Autocomplete,
@@ -6,6 +7,10 @@ import {
   Button,
   Checkbox,
   CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   FormControl,
   FormControlLabel,
   InputLabel,
@@ -19,9 +24,9 @@ import {
 } from '@mui/material'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { getRiskObjects, getRisks, getUsersList } from '../api/client'
+import { getRiskObjectById, getRiskObjects, getRisks, getUsersList } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
-import type { RiskObject } from '../types/riskObjects'
+import type { RiskObject, RiskObjectDetails } from '../types/riskObjects'
 import {
   actionLabels,
   buildRuleRows,
@@ -60,7 +65,8 @@ function normalizeUsers(items: unknown[]): UserOption[] {
 export function RulesDetailsPage() {
   const navigate = useNavigate()
   const { id = '' } = useParams()
-  const { token } = useAuth()
+  const { token, hasPermission } = useAuth()
+  const canManageRulesAndRisks = hasPermission('manage_rules_and_risks')
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -69,9 +75,14 @@ export function RulesDetailsPage() {
 
   const [ruleRow, setRuleRow] = useState<RuleTableRow | null>(null)
   const [riskObjects, setRiskObjects] = useState<RiskObject[]>([])
+  const [riskObjectPreviewOpen, setRiskObjectPreviewOpen] = useState(false)
+  const [riskObjectPreviewLoading, setRiskObjectPreviewLoading] = useState(false)
+  const [riskObjectPreviewError, setRiskObjectPreviewError] = useState<string | null>(null)
+  const [riskObjectPreview, setRiskObjectPreview] = useState<RiskObjectDetails | null>(null)
   const [categories, setCategories] = useState<RiskCategoryOption[]>([])
   const [users, setUsers] = useState<UserOption[]>([])
   const [draft, setDraft] = useState<RuleEditorDraft | null>(null)
+  const canEdit = editingEnabled && canManageRulesAndRisks
 
   useEffect(() => {
     if (!token || !id) return
@@ -126,7 +137,35 @@ export function RulesDetailsPage() {
     return ruleRow?.condition ?? ''
   }, [ruleRow])
 
+  async function handleOpenRiskObjectPreview() {
+    if (!token || !draft?.riskObjectId) return
+    setRiskObjectPreviewOpen(true)
+    setRiskObjectPreviewLoading(true)
+    setRiskObjectPreviewError(null)
+    setRiskObjectPreview(null)
+    try {
+      const details = await getRiskObjectById(token, draft.riskObjectId)
+      setRiskObjectPreview(details)
+    } catch (e: unknown) {
+      setRiskObjectPreviewError(
+        e instanceof Error ? e.message : 'Не удалось загрузить рисковый объект',
+      )
+    } finally {
+      setRiskObjectPreviewLoading(false)
+    }
+  }
+
+  const riskObjectPreviewJson = useMemo(() => {
+    if (!riskObjectPreview?.definition) return '{}'
+    try {
+      return JSON.stringify(riskObjectPreview.definition, null, 2)
+    } catch {
+      return '{}'
+    }
+  }, [riskObjectPreview])
+
   function handleSave() {
+    if (!canManageRulesAndRisks) return
     if (!id || !draft) return
     saveRuleOverride(id, draft)
     setSaveInfo('Правило сохранено')
@@ -172,14 +211,23 @@ export function RulesDetailsPage() {
           Просмотр правила и риска
         </Typography>
         <Stack direction="row" spacing={1}>
-          <Button variant="outlined" onClick={() => navigate('/app/risk-categories')}>
+          <Button
+            variant="outlined"
+            onClick={() => navigate('/app/risk-categories')}
+            disabled={!canManageRulesAndRisks}
+          >
             Категории риска
           </Button>
-          <Button variant="contained" onClick={handleSave} disabled={!editingEnabled}>
+          <Button variant="contained" onClick={handleSave} disabled={!canEdit}>
             Сохранить
           </Button>
         </Stack>
       </Box>
+      {!canManageRulesAndRisks ? (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          Доступен только просмотр страницы. Редактирование правил и рисков отключено.
+        </Alert>
+      ) : null}
 
       {saveInfo ? (
         <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSaveInfo(null)}>
@@ -189,7 +237,13 @@ export function RulesDetailsPage() {
 
       <FormControlLabel
         sx={{ mb: 2 }}
-        control={<Switch checked={editingEnabled} onChange={(event) => setEditingEnabled(event.target.checked)} />}
+        control={
+          <Switch
+            checked={editingEnabled}
+            onChange={(event) => setEditingEnabled(event.target.checked)}
+            disabled={!canManageRulesAndRisks}
+          />
+        }
         label="Начать редактирование"
       />
 
@@ -208,7 +262,7 @@ export function RulesDetailsPage() {
               const value = event.target.value
               setDraft((prev) => (prev ? { ...prev, riskObjectId: value } : prev))
             }}
-            disabled={!editingEnabled || riskObjects.length === 0}
+            disabled={!canEdit || riskObjects.length === 0}
           >
             {riskObjects.map((riskObject) => (
               <MenuItem key={riskObject.id} value={riskObject.id}>
@@ -221,16 +275,30 @@ export function RulesDetailsPage() {
           <Alert severity="info">
             Рисковые объекты еще не созданы. Создайте объект, чтобы привязать его к правилу.
             <Box sx={{ mt: 1 }}>
-              <Button size="small" onClick={() => navigate('/app/risk-objects/new')}>
+              <Button
+                size="small"
+                onClick={() => navigate('/app/risk-objects/new')}
+                disabled={!canManageRulesAndRisks}
+              >
                 Перейти к созданию рискового объекта
               </Button>
             </Box>
           </Alert>
         ) : null}
+        <Box sx={{ mt: -1 }}>
+          <Button
+            variant="outlined"
+            startIcon={<VisibilityOutlinedIcon />}
+            onClick={() => void handleOpenRiskObjectPreview()}
+            disabled={!draft.riskObjectId}
+          >
+            Просмотреть рисковый объект
+          </Button>
+        </Box>
 
         <Stack spacing={1}>
           <Typography variant="subtitle2">Механизм обнаружения (groovy-скрипт)</Typography>
-          <Button variant="outlined" component="label" disabled={!editingEnabled}>
+          <Button variant="outlined" component="label" disabled={!canEdit}>
             Загрузить скрипт
             <input
               hidden
@@ -272,7 +340,7 @@ export function RulesDetailsPage() {
               const value = event.target.value
               setDraft((prev) => (prev ? { ...prev, categoryId: value } : prev))
             }}
-            disabled={!editingEnabled}
+            disabled={!canEdit}
           >
             {categories.map((category) => (
               <MenuItem key={category.id} value={category.id}>
@@ -292,7 +360,7 @@ export function RulesDetailsPage() {
               const value = event.target.value as RuleEditorDraft['priority']
               setDraft((prev) => (prev ? { ...prev, priority: value } : prev))
             }}
-            disabled={!editingEnabled}
+            disabled={!canEdit}
           >
             {Object.entries(priorityLabels).map(([value, label]) => (
               <MenuItem key={value} value={value}>
@@ -318,7 +386,7 @@ export function RulesDetailsPage() {
           )}
           isOptionEqualToValue={(option, value) => option.id === value.id}
           noOptionsText="Пользователи не найдены"
-          disabled={!editingEnabled}
+          disabled={!canEdit}
         />
 
         <FormControl fullWidth>
@@ -336,7 +404,7 @@ export function RulesDetailsPage() {
               setDraft((prev) => (prev ? { ...prev, actions: values } : prev))
             }}
             renderValue={(selected) => selected.map((item) => actionLabels[item]).join(', ')}
-            disabled={!editingEnabled}
+            disabled={!canEdit}
           >
             <MenuItem value="createIncident">
               <Checkbox checked={draft.actions.includes('createIncident')} />
@@ -357,12 +425,84 @@ export function RulesDetailsPage() {
                 const value = event.target.checked
                 setDraft((prev) => (prev ? { ...prev, enabled: value } : prev))
               }}
-              disabled={!editingEnabled}
+              disabled={!canEdit}
             />
           }
           label={draft.enabled ? 'Правило включено' : 'Правило выключено'}
         />
       </Stack>
+
+      <Dialog
+        open={riskObjectPreviewOpen}
+        onClose={() => setRiskObjectPreviewOpen(false)}
+        fullWidth
+        maxWidth="md"
+      >
+        <DialogTitle>Просмотр рискового объекта</DialogTitle>
+        <DialogContent dividers>
+          {riskObjectPreviewLoading ? (
+            <Box sx={{ py: 4, display: 'flex', justifyContent: 'center' }}>
+              <CircularProgress />
+            </Box>
+          ) : riskObjectPreviewError ? (
+            <Alert severity="error">{riskObjectPreviewError}</Alert>
+          ) : riskObjectPreview ? (
+            <Stack spacing={2}>
+              <TextField label="Код" value={riskObjectPreview.code} fullWidth disabled />
+              <TextField label="Наименование" value={riskObjectPreview.name} fullWidth disabled />
+              <TextField
+                label="Статус"
+                value={riskObjectPreview.status === 'active' ? 'Active' : 'Disable'}
+                fullWidth
+                disabled
+              />
+              <TextField
+                label="Обновлён"
+                value={
+                  riskObjectPreview.updatedAt
+                    ? new Date(riskObjectPreview.updatedAt).toLocaleString('ru-RU')
+                    : ''
+                }
+                fullWidth
+                disabled
+              />
+              <Box>
+                <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                  JSON-структура
+                </Typography>
+                <Box
+                  component="pre"
+                  sx={{
+                    m: 0,
+                    p: 1.5,
+                    borderRadius: 1,
+                    bgcolor: 'grey.900',
+                    color: 'grey.100',
+                    fontSize: 12,
+                    lineHeight: 1.5,
+                    overflow: 'auto',
+                    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                    maxHeight: 320,
+                  }}
+                >
+                  {riskObjectPreviewJson}
+                </Box>
+              </Box>
+            </Stack>
+          ) : null}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setRiskObjectPreviewOpen(false)}>Закрыть</Button>
+          {riskObjectPreview?.id ? (
+            <Button
+              variant="outlined"
+              onClick={() => navigate(`/app/risk-objects/${riskObjectPreview.id}?readonly=1`)}
+            >
+              Открыть полную карточку
+            </Button>
+          ) : null}
+        </DialogActions>
+      </Dialog>
     </Box>
   )
 }

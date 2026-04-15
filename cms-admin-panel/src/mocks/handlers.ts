@@ -1,4 +1,5 @@
 import { delay, http, HttpResponse } from 'msw'
+import type { AccessPermission } from '../types/permissions'
 import type { AppUser } from '../types/user'
 
 const MOCK_TOKEN = 'mock-trustflow-admin-token'
@@ -11,32 +12,178 @@ const adminUser: AppUser = {
   companyId: 'company-trustflow-001',
 }
 
-const mockUsers: Array<{
+const adminPermissions: AccessPermission[] = [
+  'view_all_pages',
+  'view_dashboard_page',
+  'view_users_page',
+  'view_risk_objects_page',
+  'view_integrations_page',
+  'view_rules_and_risks_page',
+  'view_settings_page',
+  'view_profile_page',
+  'edit_users',
+  'manage_risk_objects',
+  'manage_integrations',
+  'manage_rules_and_risks',
+]
+
+const managerUser: AppUser = {
+  id: '101',
+  name: 'Алексей Иванов',
+  email: 'manager@trustflow.local',
+  role: 'manager',
+  companyId: 'company-trustflow-001',
+}
+
+const managerPermissions: AccessPermission[] = [
+  'view_dashboard_page',
+  'view_users_page',
+  'view_risk_objects_page',
+  'view_profile_page',
+  'edit_users',
+  'manage_risk_objects',
+]
+
+const headUser: AppUser = {
+  id: '102',
+  name: 'Мария Петрова',
+  email: 'head@trustflow.local',
+  role: 'head',
+  companyId: 'company-trustflow-001',
+}
+
+const headPermissions: AccessPermission[] = [
+  'view_dashboard_page',
+  'view_users_page',
+  'view_risk_objects_page',
+  'view_integrations_page',
+  'view_profile_page',
+  'manage_risk_objects',
+  'manage_integrations',
+]
+
+const topManagerUser: AppUser = {
+  id: '103',
+  name: 'Иван Сидоров',
+  email: 'top@trustflow.local',
+  role: 'top_management',
+  companyId: 'company-trustflow-001',
+}
+
+const topManagerPermissions: AccessPermission[] = [
+  'view_all_pages',
+  'view_dashboard_page',
+  'view_users_page',
+  'view_risk_objects_page',
+  'view_integrations_page',
+  'view_rules_and_risks_page',
+  'view_settings_page',
+  'view_profile_page',
+  'edit_users',
+  'manage_risk_objects',
+  'manage_integrations',
+  'manage_rules_and_risks',
+]
+
+const demoAuthAccounts = [
+  {
+    email: adminUser.email.toLowerCase(),
+    password: 'admin123',
+    user: adminUser,
+    permissions: adminPermissions,
+  },
+  {
+    email: managerUser.email.toLowerCase(),
+    password: 'manager123',
+    user: managerUser,
+    permissions: managerPermissions,
+  },
+  {
+    email: headUser.email.toLowerCase(),
+    password: 'head123',
+    user: headUser,
+    permissions: headPermissions,
+  },
+  {
+    email: topManagerUser.email.toLowerCase(),
+    password: 'top123',
+    user: topManagerUser,
+    permissions: topManagerPermissions,
+  },
+] as const
+
+let currentAuthAccount =
+  demoAuthAccounts.find((account) => account.user.email === adminUser.email) ??
+  demoAuthAccounts[0]
+
+let mockUsers: Array<{
   id: string
   name: string
   email: string
-  status: string
+  status: 'active' | 'blocked'
+  jobTitle: 'manager' | 'head' | 'top_management'
+  accessPermissions: AccessPermission[]
   createdAt: string
 }> = [
   {
-    id: '101',
-    name: 'ООО «Ромашка»',
-    email: 'contact@romashka.example',
+    id: '1',
+    name: 'Алексей Иванов',
+    email: 'admin@trustflow.local',
     status: 'active',
+    jobTitle: 'top_management',
+    accessPermissions: adminPermissions,
+    createdAt: '2026-02-01',
+  },
+  {
+    id: '101',
+    name: 'Алексей Иванов',
+    email: managerUser.email,
+    status: 'active',
+    jobTitle: 'manager',
+    accessPermissions: [
+      'view_dashboard_page',
+      'view_users_page',
+      'view_risk_objects_page',
+      'edit_users',
+      'manage_risk_objects',
+    ],
     createdAt: '2026-03-12',
   },
   {
     id: '102',
-    name: 'ИП Сидоров',
-    email: 'sidorov@example.com',
-    status: 'pending',
+    name: 'Мария Петрова',
+    email: headUser.email,
+    status: 'blocked',
+    jobTitle: 'head',
+    accessPermissions: [
+      'view_dashboard_page',
+      'view_risk_objects_page',
+      'view_integrations_page',
+      'manage_risk_objects',
+      'manage_integrations',
+    ],
     createdAt: '2026-04-01',
   },
   {
     id: '103',
-    name: 'Trustflow Demo',
-    email: 'demo@trustflow.local',
+    name: 'Иван Сидоров',
+    email: topManagerUser.email,
     status: 'active',
+    jobTitle: 'top_management',
+    accessPermissions: [
+      'view_all_pages',
+      'view_dashboard_page',
+      'view_users_page',
+      'view_risk_objects_page',
+      'view_integrations_page',
+      'view_rules_and_risks_page',
+      'view_settings_page',
+      'view_profile_page',
+      'edit_users',
+      'manage_risk_objects',
+      'manage_integrations',
+      'manage_rules_and_risks',
+    ],
     createdAt: '2026-04-10',
   },
 ]
@@ -333,7 +480,7 @@ let mockRiskObjects = [
   },
 ]
 
-const mockRisks = [
+let mockRisks = [
   {
     id: 'risk-1',
     category: 'financial' as const,
@@ -377,6 +524,55 @@ const mockRisks = [
     riskObjectId: 'ro-6',
   },
 ]
+
+const RULE_HISTORY_TEMPLATES = [
+  {
+    ruleName: 'Падение платёжной дисциплины',
+    description: 'Изменён порог срабатывания и период оценки',
+    authorName: 'Алексей Иванов',
+  },
+  {
+    ruleName: 'Высокая долговая нагрузка',
+    description: 'Обновлены действия системы при срабатывании',
+    authorName: 'Мария Петрова',
+  },
+  {
+    ruleName: 'Негативный новостной фон',
+    description: 'Назначен новый ответственный сотрудник',
+    authorName: 'Иван Сидоров',
+  },
+  {
+    ruleName: 'Жалобы ключевых партнёров',
+    description: 'Категория риска изменена на репутационную',
+    authorName: 'Мария Петрова',
+  },
+  {
+    ruleName: 'Сбой в интеграции данных',
+    description: 'Правило временно отключено',
+    authorName: 'Алексей Иванов',
+  },
+] as const
+
+function buildMockRuleChangeHistory(count: number) {
+  return Array.from({ length: count }, (_, i) => {
+    const t = RULE_HISTORY_TEMPLATES[i % RULE_HISTORY_TEMPLATES.length]
+    const day = 1 + (i % 28)
+    const hour = 7 + (i % 13)
+    const minute = (i * 7) % 60
+    const pad = (n: number) => String(n).padStart(2, '0')
+    const ruleId = mockRisks.find((r) => r.name === t.ruleName)?.id
+    return {
+      id: `rhist-${i + 1}`,
+      ruleId,
+      changedAt: `2026-04-${pad(day)}T${pad(hour)}:${pad(minute)}:00.000Z`,
+      ruleName: t.ruleName,
+      description: `${t.description} (#${i + 1})`,
+      authorName: t.authorName,
+    }
+  })
+}
+
+const mockRuleChangeHistory = buildMockRuleChangeHistory(44)
 
 const RO_HISTORY_TEMPLATES = [
   {
@@ -444,10 +640,14 @@ export const handlers = [
     const email = body.email?.trim().toLowerCase()
     const password = body.password ?? ''
 
-    if (email === adminUser.email.toLowerCase() && password === 'admin123') {
+    const account = demoAuthAccounts.find(
+      (item) => item.email === email && item.password === password,
+    )
+    if (account) {
+      currentAuthAccount = account
       return HttpResponse.json({
         accessToken: MOCK_TOKEN,
-        user: adminUser,
+        user: account.user,
       })
     }
 
@@ -463,7 +663,16 @@ export const handlers = [
     if (token !== MOCK_TOKEN) {
       return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
     }
-    return HttpResponse.json(adminUser)
+    return HttpResponse.json(currentAuthAccount.user)
+  }),
+
+  http.get('/api/me/permissions', async ({ request }) => {
+    await delay(200)
+    const token = parseAuth(request)
+    if (token !== MOCK_TOKEN) {
+      return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
+    }
+    return HttpResponse.json({ items: currentAuthAccount.permissions })
   }),
 
   http.get('/api/dashboard/summary', async ({ request }) => {
@@ -487,6 +696,47 @@ export const handlers = [
       return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
     }
     return HttpResponse.json({ items: mockUsers })
+  }),
+
+  http.get('/api/users/:id/access', async ({ request, params }) => {
+    await delay(220)
+    const token = parseAuth(request)
+    if (token !== MOCK_TOKEN) {
+      return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
+    }
+    const id = String(params.id ?? '')
+    const user = mockUsers.find((item) => item.id === id)
+    if (!user) {
+      return HttpResponse.json({ message: 'Пользователь не найден' }, { status: 404 })
+    }
+    return HttpResponse.json({ accessPermissions: user.accessPermissions })
+  }),
+
+  http.put('/api/users/:id/access', async ({ request, params }) => {
+    await delay(260)
+    const token = parseAuth(request)
+    if (token !== MOCK_TOKEN) {
+      return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
+    }
+    const id = String(params.id ?? '')
+    const userIndex = mockUsers.findIndex((item) => item.id === id)
+    if (userIndex < 0) {
+      return HttpResponse.json({ message: 'Пользователь не найден' }, { status: 404 })
+    }
+    const body = (await request.json().catch(() => ({}))) as {
+      accessPermissions?: unknown
+    }
+    if (!Array.isArray(body.accessPermissions)) {
+      return HttpResponse.json({ message: 'Некорректный формат прав доступа' }, { status: 400 })
+    }
+    const nextPermissions = body.accessPermissions.filter(
+      (item): item is AccessPermission => typeof item === 'string',
+    )
+    mockUsers[userIndex] = {
+      ...mockUsers[userIndex],
+      accessPermissions: nextPermissions,
+    }
+    return HttpResponse.json({ accessPermissions: nextPermissions })
   }),
 
   http.get('/api/settings', async ({ request }) => {
@@ -737,6 +987,81 @@ export const handlers = [
       return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
     }
     return HttpResponse.json({ items: mockRisks })
+  }),
+
+  http.post('/api/risks', async ({ request }) => {
+    await delay(250)
+    const token = parseAuth(request)
+    if (token !== MOCK_TOKEN) {
+      return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
+    }
+    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>
+    const name = typeof body.name === 'string' ? body.name.trim() : ''
+    const description = typeof body.description === 'string' ? body.description.trim() : ''
+    const category = body.category
+    const riskObjectId =
+      typeof body.riskObjectId === 'string' ? body.riskObjectId.trim() : ''
+
+    if (!name || !description) {
+      return HttpResponse.json(
+        { message: 'Заполните название и описание' },
+        { status: 400 },
+      )
+    }
+    if (
+      category !== 'financial' &&
+      category !== 'reputational' &&
+      category !== 'operational'
+    ) {
+      return HttpResponse.json({ message: 'Некорректная категория риска' }, { status: 400 })
+    }
+    const riskObjectExists = riskObjectId
+      ? mockRiskObjects.some((item) => item.id === riskObjectId)
+      : true
+    if (!riskObjectExists) {
+      return HttpResponse.json({ message: 'Рисковый объект не найден' }, { status: 404 })
+    }
+
+    const id = `risk-${Date.now()}`
+    mockRisks = [
+      {
+        id,
+        category,
+        name,
+        description,
+        riskObjectId,
+      },
+      ...mockRisks,
+    ]
+    return HttpResponse.json({ id, savedAt: new Date().toISOString() }, { status: 201 })
+  }),
+
+  http.get('/api/rules/change-history', async ({ request }) => {
+    await delay(260)
+    const token = parseAuth(request)
+    if (token !== MOCK_TOKEN) {
+      return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
+    }
+    const url = new URL(request.url)
+    const page = Math.max(1, Number.parseInt(url.searchParams.get('page') ?? '1', 10) || 1)
+    const rawSize = Number.parseInt(url.searchParams.get('pageSize') ?? '5', 10)
+    const pageSize = Math.min(50, Math.max(1, Number.isFinite(rawSize) ? rawSize : 5))
+
+    const q = (url.searchParams.get('q') ?? '').trim().toLowerCase()
+    let pool = mockRuleChangeHistory
+    if (q) {
+      pool = pool.filter(
+        (row) =>
+          row.ruleName.toLowerCase().includes(q) ||
+          row.description.toLowerCase().includes(q) ||
+          row.authorName.toLowerCase().includes(q),
+      )
+    }
+
+    const start = (page - 1) * pageSize
+    const items = pool.slice(start, start + pageSize)
+    const hasMore = start + items.length < pool.length
+    return HttpResponse.json({ items, hasMore })
   }),
 
   http.post('/api/risk-objects', async ({ request }) => {

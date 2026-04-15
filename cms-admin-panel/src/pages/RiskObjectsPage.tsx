@@ -54,7 +54,8 @@ function formatDateTime(iso: string) {
 
 export function RiskObjectsPage() {
   const navigate = useNavigate()
-  const { token } = useAuth()
+  const { token, hasPermission } = useAuth()
+  const canManageRiskObjects = hasPermission('manage_risk_objects')
   const LIST_PAGE_SIZE = 6
   const [rows, setRows] = useState<RiskObject[]>([])
   const [listPage, setListPage] = useState(1)
@@ -211,10 +212,16 @@ export function RiskObjectsPage() {
           startIcon={<AddIcon />}
           size="medium"
           onClick={() => navigate('/app/risk-objects/new')}
+          disabled={!canManageRiskObjects}
         >
           Создать
         </Button>
       </Box>
+      {!canManageRiskObjects ? (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          Доступен только просмотр страницы. Создание и редактирование рисковых объектов отключено.
+        </Alert>
+      ) : null}
 
       {listError ? (
         <Alert severity="error" sx={{ mb: 2 }}>

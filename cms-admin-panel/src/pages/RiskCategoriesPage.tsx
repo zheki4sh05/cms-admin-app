@@ -13,6 +13,9 @@ import {
   DialogTitle,
   IconButton,
   Paper,
+  Slide,
+  type SlideProps,
+  Snackbar,
   Stack,
   Table,
   TableBody,
@@ -23,8 +26,10 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
+import type { SyntheticEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../auth/AuthContext'
 import {
   loadRiskCategories,
   saveRiskCategories,
@@ -37,12 +42,30 @@ function createCategoryId() {
 
 export function RiskCategoriesPage() {
   const navigate = useNavigate()
+  const { hasPermission } = useAuth()
+  const canManageRulesAndRisks = hasPermission('manage_rules_and_risks')
   const [categories, setCategories] = useState<RiskCategoryOption[]>(() => loadRiskCategories())
   const [newCategoryName, setNewCategoryName] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingName, setEditingName] = useState('')
   const [categoryToDelete, setCategoryToDelete] = useState<RiskCategoryOption | null>(null)
-  const [info, setInfo] = useState<string | null>(null)
+  type OperationToast = { severity: 'success' | 'error'; text: string }
+  const [toast, setToast] = useState<OperationToast | null>(null)
+  const [toastOpen, setToastOpen] = useState(false)
+
+  const showToast = useCallback((payload: OperationToast) => {
+    setToast(payload)
+    setToastOpen(true)
+  }, [])
+
+  const handleToastClose = useCallback(
+    (_: SyntheticEvent | Event, _reason?: 'timeout' | 'clickaway' | 'escapeKeyDown') => {
+      setToastOpen(false)
+    },
+    [],
+  )
+
+  const handleToastExited = useCallback(() => setToast(null), [])
 
   const duplicateName = useMemo(() => {
     const normalized = newCategoryName.trim().toLowerCase()
@@ -53,12 +76,20 @@ export function RiskCategoriesPage() {
   function persist(next: RiskCategoryOption[], message: string) {
     setCategories(next)
     saveRiskCategories(next)
-    setInfo(message)
+    showToast({ severity: 'success', text: message })
   }
 
   function handleAddCategory() {
+    if (!canManageRulesAndRisks) return
     const name = newCategoryName.trim()
-    if (!name || duplicateName) return
+    if (!name) {
+      showToast({ severity: 'error', text: 'Введите название категории' })
+      return
+    }
+    if (duplicateName) {
+      showToast({ severity: 'error', text: 'Категория с таким названием уже существует' })
+      return
+    }
     persist(
       [...categories, { id: createCategoryId(), name, system: false }],
       'Категория добавлена',
@@ -67,17 +98,25 @@ export function RiskCategoriesPage() {
   }
 
   function startEdit(category: RiskCategoryOption) {
+    if (!canManageRulesAndRisks) return
     setEditingId(category.id)
     setEditingName(category.name)
   }
 
   function saveEdit(categoryId: string) {
+    if (!canManageRulesAndRisks) return
     const name = editingName.trim()
-    if (!name) return
+    if (!name) {
+      showToast({ severity: 'error', text: 'Название категории не может быть пустым' })
+      return
+    }
     const duplicate = categories.some(
       (item) => item.id !== categoryId && item.name.trim().toLowerCase() === name.toLowerCase(),
     )
-    if (duplicate) return
+    if (duplicate) {
+      showToast({ severity: 'error', text: 'Категория с таким названием уже существует' })
+      return
+    }
     const next = categories.map((item) => (item.id === categoryId ? { ...item, name } : item))
     persist(next, 'Категория обновлена')
     setEditingId(null)
@@ -85,6 +124,7 @@ export function RiskCategoriesPage() {
   }
 
   function confirmDelete() {
+    if (!canManageRulesAndRisks) return
     if (!categoryToDelete) return
     const next = categories.filter((item) => item.id !== categoryToDelete.id)
     persist(next, 'Категория удалена')
@@ -107,10 +147,9 @@ export function RiskCategoriesPage() {
       <Typography color="text.secondary" sx={{ mb: 3 }}>
         Добавляйте, редактируйте и удаляйте категории для бизнес-правил.
       </Typography>
-
-      {info ? (
-        <Alert severity="success" sx={{ mb: 2 }} onClose={() => setInfo(null)}>
-          {info}
+      {!canManageRulesAndRisks ? (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          Доступен только просмотр страницы. Управление категориями риска отключено.
         </Alert>
       ) : null}
 
@@ -121,10 +160,13 @@ export function RiskCategoriesPage() {
             value={newCategoryName}
             onChange={(event) => setNewCategoryName(event.target.value)}
             fullWidth
-            error={duplicateName}
-            helperText={duplicateName ? 'Категория с таким названием уже существует' : undefined}
+            disabled={!canManageRulesAndRisks}
           />
-          <Button variant="contained" onClick={handleAddCategory} disabled={!newCategoryName.trim() || duplicateName}>
+          <Button
+            variant="contained"
+            onClick={handleAddCategory}
+            disabled={!newCategoryName.trim() || !canManageRulesAndRisks}
+          >
             Добавить
           </Button>
         </Stack>
@@ -161,6 +203,7 @@ export function RiskCategoriesPage() {
                           value={editingName}
                           onChange={(event) => setEditingName(event.target.value)}
                           fullWidth
+                          disabled={!canManageRulesAndRisks}
                         />
                       ) : (
                         category.name
@@ -174,6 +217,7 @@ export function RiskCategoriesPage() {
                             color="primary"
                             onClick={() => saveEdit(category.id)}
                             aria-label="Сохранить"
+                            disabled={!canManageRulesAndRisks}
                           >
                             <SaveOutlinedIcon fontSize="small" />
                           </IconButton>
@@ -194,6 +238,7 @@ export function RiskCategoriesPage() {
                             color="primary"
                             onClick={() => startEdit(category)}
                             aria-label="Редактировать"
+                            disabled={!canManageRulesAndRisks}
                           >
                             <EditOutlinedIcon fontSize="small" />
                           </IconButton>
@@ -202,6 +247,7 @@ export function RiskCategoriesPage() {
                             color="error"
                             onClick={() => setCategoryToDelete(category)}
                             aria-label="Удалить"
+                            disabled={!canManageRulesAndRisks}
                           >
                             <DeleteOutlinedIcon fontSize="small" />
                           </IconButton>
@@ -216,7 +262,10 @@ export function RiskCategoriesPage() {
         </Table>
       </TableContainer>
 
-      <Dialog open={Boolean(categoryToDelete)} onClose={() => setCategoryToDelete(null)}>
+      <Dialog
+        open={Boolean(categoryToDelete)}
+        onClose={() => setCategoryToDelete(null)}
+      >
         <DialogTitle>Удалить категорию?</DialogTitle>
         <DialogContent>
           <DialogContentText>
@@ -226,11 +275,44 @@ export function RiskCategoriesPage() {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setCategoryToDelete(null)}>Отмена</Button>
-          <Button color="error" variant="contained" onClick={confirmDelete}>
+          <Button
+            color="error"
+            variant="contained"
+            onClick={confirmDelete}
+            disabled={!canManageRulesAndRisks}
+          >
             Удалить
           </Button>
         </DialogActions>
       </Dialog>
+
+      <Snackbar
+        open={toastOpen}
+        autoHideDuration={5600}
+        onClose={handleToastClose}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+        slots={{ transition: Slide }}
+        slotProps={{
+          transition: {
+            appear: true,
+            direction: 'up',
+            timeout: { enter: 400, exit: 320 },
+            onExited: handleToastExited,
+          } as SlideProps,
+        }}
+      >
+        {toast ? (
+          <Alert
+            severity={toast.severity}
+            variant="filled"
+            elevation={6}
+            onClose={() => setToastOpen(false)}
+            sx={{ minWidth: { xs: 260, sm: 300 }, maxWidth: 440, borderRadius: 2 }}
+          >
+            {toast.text}
+          </Alert>
+        ) : null}
+      </Snackbar>
     </Box>
   )
 }

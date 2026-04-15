@@ -204,7 +204,8 @@ function parseIntegrationImport(
 
 export function IntegrationCreatePage() {
   const navigate = useNavigate()
-  const { token } = useAuth()
+  const { token, hasPermission } = useAuth()
+  const canManageIntegrations = hasPermission('manage_integrations')
 
   const [name, setName] = useState('')
   const [integrationKind, setIntegrationKind] = useState<IntegrationKind | ''>('')
@@ -342,6 +343,10 @@ export function IntegrationCreatePage() {
       showToast({ severity: 'error', text: 'Нет сессии — войдите снова.' })
       return
     }
+    if (!canManageIntegrations) {
+      showToast({ severity: 'error', text: 'Недостаточно прав для редактирования' })
+      return
+    }
     const payload = buildPayload(
       name,
       integrationKind,
@@ -377,7 +382,17 @@ export function IntegrationCreatePage() {
     } finally {
       setSaving(false)
     }
-  }, [token, name, integrationKind, endpointUrl, riskObjectModelId, mappingRows, showToast, navigate])
+  }, [
+    token,
+    canManageIntegrations,
+    name,
+    integrationKind,
+    endpointUrl,
+    riskObjectModelId,
+    mappingRows,
+    showToast,
+    navigate,
+  ])
 
   const handleExport = useCallback(() => {
     const payload = buildPayload(
@@ -461,6 +476,7 @@ export function IntegrationCreatePage() {
             variant="outlined"
             startIcon={<FileDownloadOutlinedIcon />}
             onClick={handleExport}
+            disabled={!canManageIntegrations}
           >
             Экспорт
           </Button>
@@ -469,7 +485,7 @@ export function IntegrationCreatePage() {
             variant="contained"
             startIcon={<SaveOutlinedIcon />}
             onClick={() => void handleToolbarSave()}
-            disabled={!token || saving}
+            disabled={!token || saving || !canManageIntegrations}
           >
             Сохранить
           </Button>
@@ -479,6 +495,7 @@ export function IntegrationCreatePage() {
             color="warning"
             startIcon={<ClearAllOutlinedIcon />}
             onClick={() => setClearDialogOpen(true)}
+            disabled={!canManageIntegrations}
           >
             Очистить
           </Button>
@@ -487,6 +504,7 @@ export function IntegrationCreatePage() {
             variant="outlined"
             startIcon={<UploadFileOutlinedIcon />}
             onClick={() => fileInputRef.current?.click()}
+            disabled={!canManageIntegrations}
           >
             Импорт
           </Button>
@@ -499,6 +517,11 @@ export function IntegrationCreatePage() {
           />
         </Stack>
       </Box>
+      {!canManageIntegrations ? (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          Доступен только просмотр страницы. Создание и редактирование интеграций отключено.
+        </Alert>
+      ) : null}
 
       <Dialog open={clearDialogOpen} onClose={() => setClearDialogOpen(false)}>
         <DialogTitle>Очистить форму?</DialogTitle>
@@ -531,6 +554,7 @@ export function IntegrationCreatePage() {
             onChange={(e) => setName(e.target.value)}
             fullWidth
             autoComplete="off"
+            disabled={!canManageIntegrations}
           />
 
           <FormControl fullWidth>
@@ -543,6 +567,7 @@ export function IntegrationCreatePage() {
               }}
               aria-label="Вид интеграции"
               fullWidth
+              disabled={!canManageIntegrations}
               sx={{ flexWrap: 'wrap' }}
             >
               <ToggleButton value="pull" sx={{ flex: 1, textTransform: 'none' }}>
@@ -565,13 +590,14 @@ export function IntegrationCreatePage() {
             type="url"
             placeholder="https://"
             autoComplete="off"
+            disabled={!canManageIntegrations}
           />
 
           <Divider sx={{ borderBottomWidth: 2 }} />
 
           <FormControl
             fullWidth
-            disabled={riskModelsLoading || riskModels.length === 0}
+            disabled={!canManageIntegrations || riskModelsLoading || riskModels.length === 0}
             error={Boolean(riskModelsError)}
           >
             <FormLabel id="risk-object-model-label" sx={{ mb: 0.75, display: 'block' }}>
@@ -659,6 +685,7 @@ export function IntegrationCreatePage() {
                           size="small"
                           aria-label="Удалить правило"
                           onClick={() => removeMappingRow(row.id)}
+                          disabled={!canManageIntegrations}
                         >
                           <DeleteOutlinedIcon fontSize="small" />
                         </IconButton>
@@ -671,6 +698,7 @@ export function IntegrationCreatePage() {
                         size="small"
                         placeholder="Имя поля источника"
                         autoComplete="off"
+                        disabled={!canManageIntegrations}
                       />
                       {modelDefinitionLoading ? (
                         <TextField
@@ -697,6 +725,7 @@ export function IntegrationCreatePage() {
                             onChange={(e) =>
                               patchMappingRow(row.id, { to: e.target.value as string })
                             }
+                            disabled={!canManageIntegrations}
                           >
                             <MenuItem value="">
                               <em>— не выбрано —</em>
@@ -724,6 +753,7 @@ export function IntegrationCreatePage() {
                                 : 'Структура объекта не загружена.'
                           }
                           autoComplete="off"
+                          disabled={!canManageIntegrations}
                         />
                       )}
                       <TextField
@@ -736,6 +766,7 @@ export function IntegrationCreatePage() {
                         minRows={2}
                         placeholder="Необязательно: date_to_iso, код и т.п."
                         autoComplete="off"
+                        disabled={!canManageIntegrations}
                       />
                     </Stack>
                   </Paper>
@@ -746,6 +777,7 @@ export function IntegrationCreatePage() {
                 startIcon={<AddIcon />}
                 onClick={addMappingRow}
                 sx={{ mt: 2 }}
+                disabled={!canManageIntegrations}
               >
                 Добавить правило
               </Button>

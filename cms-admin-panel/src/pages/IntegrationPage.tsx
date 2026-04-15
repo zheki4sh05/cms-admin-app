@@ -56,7 +56,8 @@ function formatUpdatedAt(iso: string) {
 
 export function IntegrationPage() {
   const navigate = useNavigate()
-  const { token } = useAuth()
+  const { token, hasPermission } = useAuth()
+  const canManageIntegrations = hasPermission('manage_integrations')
   const LIST_PAGE_SIZE = 6
   const [rows, setRows] = useState<IntegrationConfig[]>([])
   const [listPage, setListPage] = useState(1)
@@ -194,10 +195,16 @@ export function IntegrationPage() {
           startIcon={<AddIcon />}
           size="medium"
           onClick={() => navigate('/app/integration/new')}
+          disabled={!canManageIntegrations}
         >
           Создать
         </Button>
       </Box>
+      {!canManageIntegrations ? (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          Доступен только просмотр страницы. Создание и редактирование интеграций отключено.
+        </Alert>
+      ) : null}
 
       {error ? (
         <Alert severity="error" sx={{ mb: 2 }}>

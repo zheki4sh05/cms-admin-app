@@ -30,6 +30,7 @@ import { useState, type ElementType } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { AppLogo } from '../components/AppLogo'
 import { useAuth } from '../auth/AuthContext'
+import { canViewPage, type AccessPermission, type PageViewPermission } from '../types/permissions'
 
 const drawerWidth = 260
 
@@ -37,19 +38,55 @@ type NavItem = {
   to: string
   label: string
   Icon: ElementType
+  requiredViewPermission: PageViewPermission
 }
 
 const navItemsMain: readonly NavItem[] = [
-  { to: '/app/dashboard', label: 'Рабочий стол', Icon: DashboardOutlinedIcon },
-  { to: '/app/users', label: 'Пользователи', Icon: PeopleOutlinedIcon },
-  { to: '/app/risk-objects', label: 'Рисковые объекты', Icon: ShieldOutlinedIcon },
-  { to: '/app/integration', label: 'Интеграция', Icon: HubOutlinedIcon },
-  { to: '/app/rules', label: 'Правила и риски', Icon: GavelOutlinedIcon },
+  {
+    to: '/app/dashboard',
+    label: 'Рабочий стол',
+    Icon: DashboardOutlinedIcon,
+    requiredViewPermission: 'view_dashboard_page',
+  },
+  {
+    to: '/app/users',
+    label: 'Пользователи',
+    Icon: PeopleOutlinedIcon,
+    requiredViewPermission: 'view_users_page',
+  },
+  {
+    to: '/app/risk-objects',
+    label: 'Рисковые объекты',
+    Icon: ShieldOutlinedIcon,
+    requiredViewPermission: 'view_risk_objects_page',
+  },
+  {
+    to: '/app/integration',
+    label: 'Интеграция',
+    Icon: HubOutlinedIcon,
+    requiredViewPermission: 'view_integrations_page',
+  },
+  {
+    to: '/app/rules',
+    label: 'Правила и риски',
+    Icon: GavelOutlinedIcon,
+    requiredViewPermission: 'view_rules_and_risks_page',
+  },
 ]
 
 const navItemsBottom: readonly NavItem[] = [
-  { to: '/app/settings', label: 'Настройки', Icon: SettingsOutlinedIcon },
-  { to: '/app/profile', label: 'Личный кабинет', Icon: PersonOutlinedIcon },
+  {
+    to: '/app/settings',
+    label: 'Настройки',
+    Icon: SettingsOutlinedIcon,
+    requiredViewPermission: 'view_settings_page',
+  },
+  {
+    to: '/app/profile',
+    label: 'Личный кабинет',
+    Icon: PersonOutlinedIcon,
+    requiredViewPermission: 'view_profile_page',
+  },
 ]
 
 function navList(items: readonly NavItem[], onNavigate?: () => void) {
@@ -82,12 +119,23 @@ function navList(items: readonly NavItem[], onNavigate?: () => void) {
 }
 
 function drawerContent({
+  permissions,
+  loading,
   onNavigate,
   onLogout,
 }: {
+  permissions: AccessPermission[]
+  loading: boolean
   onNavigate?: () => void
   onLogout: () => void
 }) {
+  const visibleMainItems = loading
+    ? navItemsMain
+    : navItemsMain.filter((item) => canViewPage(permissions, item.requiredViewPermission))
+  const visibleBottomItems = loading
+    ? navItemsBottom
+    : navItemsBottom.filter((item) => canViewPage(permissions, item.requiredViewPermission))
+
   return (
     <Box
       sx={{
@@ -117,7 +165,13 @@ function drawerContent({
         >
           Меню
         </Typography>
-        {navList(navItemsMain, onNavigate)}
+        {visibleMainItems.length > 0 ? (
+          navList(visibleMainItems, onNavigate)
+        ) : (
+          <Typography variant="body2" color="text.secondary" sx={{ px: 2, py: 1 }}>
+            Нет доступных разделов
+          </Typography>
+        )}
       </Box>
       <Box sx={{ flexGrow: 1, minHeight: 16 }} aria-hidden />
       <Box
@@ -132,7 +186,7 @@ function drawerContent({
           border: `1px solid ${alpha(theme.palette.primary.main, 0.2)}`,
         })}
       >
-        {navList(navItemsBottom, onNavigate)}
+        {visibleBottomItems.length > 0 ? navList(visibleBottomItems, onNavigate) : null}
       </Box>
       <Button
         variant="text"
@@ -177,7 +231,7 @@ export function AdminLayout() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [sidebarExpanded, setSidebarExpanded] = useState(true)
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null)
-  const { user, logout } = useAuth()
+  const { user, permissions, loading, logout } = useAuth()
   const navigate = useNavigate()
 
   const initials = user?.name
@@ -229,6 +283,8 @@ export function AdminLayout() {
         >
           <Toolbar sx={{ flexShrink: 0 }} />
           {drawerContent({
+            permissions,
+            loading,
             onNavigate: () => setMobileOpen(false),
             onLogout: handleLogout,
           })}
@@ -259,7 +315,7 @@ export function AdminLayout() {
             },
           }}
         >
-          {drawerContent({ onLogout: handleLogout })}
+          {drawerContent({ permissions, loading, onLogout: handleLogout })}
         </Drawer>
       </Box>
 
