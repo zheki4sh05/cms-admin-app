@@ -712,6 +712,30 @@ export const handlers = [
     return HttpResponse.json({ accessPermissions: user.accessPermissions })
   }),
 
+  http.put('/api/users/:id/status', async ({ request, params }) => {
+    await delay(230)
+    const token = parseAuth(request)
+    if (token !== MOCK_TOKEN) {
+      return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
+    }
+    const id = String(params.id ?? '')
+    const userIndex = mockUsers.findIndex((item) => item.id === id)
+    if (userIndex < 0) {
+      return HttpResponse.json({ message: 'Пользователь не найден' }, { status: 404 })
+    }
+    const body = (await request.json().catch(() => ({}))) as {
+      status?: unknown
+    }
+    if (body.status !== 'active' && body.status !== 'blocked') {
+      return HttpResponse.json({ message: 'Некорректный статус' }, { status: 400 })
+    }
+    mockUsers[userIndex] = {
+      ...mockUsers[userIndex],
+      status: body.status,
+    }
+    return HttpResponse.json({ status: mockUsers[userIndex].status })
+  }),
+
   http.put('/api/users/:id/access', async ({ request, params }) => {
     await delay(260)
     const token = parseAuth(request)

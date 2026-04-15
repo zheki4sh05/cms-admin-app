@@ -25,6 +25,7 @@ import { useEffect, useState } from 'react'
 import {
   getUserAccessPermissions,
   getUsersList,
+  putUserStatus,
   putUserAccessPermissions,
 } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
@@ -80,6 +81,7 @@ export function UsersPage() {
   const [draftAccessPermissions, setDraftAccessPermissions] = useState<AccessPermission[]>([])
   const [accessLoading, setAccessLoading] = useState(false)
   const [accessSaving, setAccessSaving] = useState(false)
+  const [statusUpdatingId, setStatusUpdatingId] = useState<string | null>(null)
   const [accessError, setAccessError] = useState<string | null>(null)
   const [toast, setToast] = useState<{ severity: 'success' | 'error'; text: string } | null>(
     null,
@@ -170,14 +172,24 @@ export function UsersPage() {
     }
   }, [selectedUserId, token])
 
-  function handleStatusToggle(userId: string, checked: boolean) {
-    setRows((prevRows) =>
-      prevRows.map((row) => {
-        if (row.id !== userId) return row
-        if (!canManageTargetUser(row)) return row
-        return { ...row, status: checked ? 'active' : 'blocked' }
-      }),
-    )
+  async function handleStatusToggle(userId: string, checked: boolean) {
+    if (!token) return
+    const row = rows.find((item) => item.id === userId)
+    if (!row || !canManageTargetUser(row)) return
+    const nextStatus: UserStatus = checked ? 'active' : 'blocked'
+    setStatusUpdatingId(userId)
+    try {
+      const savedStatus = await putUserStatus(token, userId, nextStatus)
+      setRows((prevRows) =>
+        prevRows.map((item) => (item.id === userId ? { ...item, status: savedStatus } : item)),
+      )
+      setToast({ severity: 'success', text: 'Статус пользователя обновлен' })
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Не удалось изменить статус пользователя'
+      setToast({ severity: 'error', text: message })
+    } finally {
+      setStatusUpdatingId(null)
+    }
   }
 
   function handlePermissionToggle(permission: ManagementPermission, checked: boolean) {
@@ -273,9 +285,6 @@ export function UsersPage() {
       <Typography variant="h5" sx={{ mb: 2 }}>
         Пользователи
       </Typography>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-        Список загружается запросом <code>/api/users</code> (мок MSW).
-      </Typography>
 
       {error ? (
         <Alert severity="error" sx={{ mb: 2 }}>
@@ -328,8 +337,8 @@ export function UsersPage() {
                       <Switch
                         size="small"
                         checked={r.status === 'active'}
-                        onChange={(e) => handleStatusToggle(r.id, e.target.checked)}
-                        disabled={!canManageTargetUser(r)}
+                        onChange={(e) => void handleStatusToggle(r.id, e.target.checked)}
+                        disabled={!canManageTargetUser(r) || statusUpdatingId === r.id}
                         inputProps={{ 'aria-label': `Статус пользователя ${r.name}` }}
                       />
                     </TableCell>

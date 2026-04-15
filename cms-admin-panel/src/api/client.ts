@@ -340,6 +340,29 @@ export async function putUserAccessPermissions(
   return data.accessPermissions ?? []
 }
 
+export async function putUserStatus(
+  token: string,
+  userId: string,
+  status: 'active' | 'blocked',
+): Promise<'active' | 'blocked'> {
+  const res = await fetch(apiUrl(`users/${userId}/status`), {
+    method: 'PUT',
+    headers: authHeaders(token),
+    body: JSON.stringify({ status }),
+  })
+  const data = (await res.json().catch(() => ({}))) as {
+    message?: string
+    status?: 'active' | 'blocked'
+  }
+  if (!res.ok) {
+    throw new Error(data.message ?? 'Не удалось изменить статус пользователя')
+  }
+  if (data.status !== 'active' && data.status !== 'blocked') {
+    throw new Error('Некорректный ответ сервера')
+  }
+  return data.status
+}
+
 export async function getSettings(token: string) {
   const res = await fetch(apiUrl('settings'), {
     headers: authHeaders(token),
