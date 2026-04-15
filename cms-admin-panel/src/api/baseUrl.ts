@@ -6,7 +6,7 @@ export function getApiBaseUrl(): string {
 
 /**
  * Собрать URL эндпоинта.
- * Пример: `auth/login` при базе `/api` → `/api/auth/login`;
+ * Пример: `auth/admin/login` при базе `/api` → `/api/auth/admin/login`;
  * при базе `http://localhost:4000/api` → полный URL.
  */
 export function apiUrl(path: string): string {

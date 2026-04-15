@@ -40,6 +40,7 @@ import {
 
 type UserStatus = 'active' | 'blocked'
 type JobTitle = 'manager' | 'head' | 'top_management'
+type BackendUserRole = 'MANAGER' | 'SUPERVISOR' | 'EXECUTIVE'
 
 type Row = {
   id: string
@@ -49,6 +50,10 @@ type Row = {
   jobTitle: JobTitle
   accessPermissions: AccessPermission[]
   createdAt: string
+}
+
+type RawRow = Partial<Row> & {
+  role?: BackendUserRole | string
 }
 
 const SUPER_USER_EMAIL = 'admin@trustflow.local'
@@ -70,6 +75,49 @@ function requiredViewPermissionForManagement(
   if (permission === 'manage_risk_objects') return 'view_risk_objects_page'
   if (permission === 'manage_integrations') return 'view_integrations_page'
   return 'view_rules_and_risks_page'
+}
+
+function mapRoleToJobTitle(role: unknown): JobTitle | null {
+  if (role === 'MANAGER') return 'manager'
+  if (role === 'SUPERVISOR') return 'head'
+  if (role === 'EXECUTIVE') return 'top_management'
+  return null
+}
+
+function mapLegacyJobTitle(jobTitle: unknown): JobTitle | null {
+  if (jobTitle === 'manager' || jobTitle === 'head' || jobTitle === 'top_management') {
+    return jobTitle
+  }
+  return null
+}
+
+function normalizeUsers(items: unknown[]): Row[] {
+  return items
+    .map((raw) => {
+      if (!raw || typeof raw !== 'object') return null
+      const row = raw as RawRow
+      const normalizedJobTitle = mapRoleToJobTitle(row.role) ?? mapLegacyJobTitle(row.jobTitle)
+      if (
+        !row.id ||
+        !row.name ||
+        !row.email ||
+        !row.createdAt ||
+        !normalizedJobTitle ||
+        (row.status !== 'active' && row.status !== 'blocked')
+      ) {
+        return null
+      }
+      return {
+        id: row.id,
+        name: row.name,
+        email: row.email,
+        status: row.status,
+        jobTitle: normalizedJobTitle,
+        accessPermissions: Array.isArray(row.accessPermissions) ? row.accessPermissions : [],
+        createdAt: row.createdAt,
+      } satisfies Row
+    })
+    .filter((item): item is Row => item !== null)
 }
 
 export function UsersPage() {
@@ -125,7 +173,7 @@ export function UsersPage() {
     setError(null)
     getUsersList(token)
       .then((items) => {
-        if (!cancelled) setRows(items as Row[])
+        if (!cancelled) setRows(normalizeUsers(items))
       })
       .catch((e: unknown) => {
         if (!cancelled) {

@@ -88,6 +88,6 @@ npm run preview
 
 ## Полезно при разработке
 
-- Если нужно сбросить текущую сессию, удалите токен в `localStorage` (`trustflow_access_token`).
+- Если нужно сбросить текущую сессию, удалите токены в `localStorage` (`trustflow_access_token`, `trustflow_refresh_token`).
 - При работе с backend убедитесь, что `VITE_API_BASE_URL` указывает на доступный API.
 - Если интерфейс недоступен, проверьте консоль браузера и `npm run lint`.

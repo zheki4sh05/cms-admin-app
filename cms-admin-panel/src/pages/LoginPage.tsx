@@ -19,6 +19,7 @@ export function LoginPage() {
   const navigate = useNavigate()
   const location = useLocation()
   const mainAppUrl = (import.meta.env.VITE_MAIN_APP_URL ?? '').trim() || '/'
+  const isTestMode = import.meta.env.MODE === 'test'
   const from =
     (location.state as { from?: string } | null)?.from ?? '/app/dashboard'
 
@@ -124,20 +125,24 @@ export function LoginPage() {
                 onChange={(e) => setPassword(e.target.value)}
                 fullWidth
                 required
-                helperText="Используйте данные из блока «Демо-аккаунты» ниже"
+                helperText={
+                  isTestMode ? undefined : 'Используйте данные из блока «Демо-аккаунты» ниже'
+                }
               />
-              <Alert severity="info" sx={{ alignItems: 'flex-start' }}>
-                <Typography variant="subtitle2" sx={{ mb: 0.75 }}>
-                  Демо-аккаунты
-                </Typography>
-                <Stack spacing={0.5}>
-                  {demoCredentials.map((item) => (
-                    <Typography key={item.email} variant="body2">
-                      {item.role}: <strong>{item.email}</strong> / <strong>{item.password}</strong>
-                    </Typography>
-                  ))}
-                </Stack>
-              </Alert>
+              {!isTestMode ? (
+                <Alert severity="info" sx={{ alignItems: 'flex-start' }}>
+                  <Typography variant="subtitle2" sx={{ mb: 0.75 }}>
+                    Демо-аккаунты
+                  </Typography>
+                  <Stack spacing={0.5}>
+                    {demoCredentials.map((item) => (
+                      <Typography key={item.email} variant="body2">
+                        {item.role}: <strong>{item.email}</strong> / <strong>{item.password}</strong>
+                      </Typography>
+                    ))}
+                  </Stack>
+                </Alert>
+              ) : null}
               <Button
                 type="submit"
                 variant="contained"
