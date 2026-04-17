@@ -65,7 +65,7 @@ function normalizeUsers(items: unknown[]): UserOption[] {
 export function RulesDetailsPage() {
   const navigate = useNavigate()
   const { id = '' } = useParams()
-  const { token, hasPermission } = useAuth()
+  const { token, user, hasPermission } = useAuth()
   const canManageRulesAndRisks = hasPermission('manage_rules_and_risks')
 
   const [loading, setLoading] = useState(true)
@@ -89,7 +89,7 @@ export function RulesDetailsPage() {
     let cancelled = false
     const overrides = loadRuleOverrides()
     const currentCategories = loadRiskCategories()
-    Promise.all([getRisks(token), getRiskObjects(token, 1, 200), getUsersList(token)])
+    Promise.all([getRisks(token), getRiskObjects(token, 1, 200), getUsersList(token, user?.companyId)])
       .then(([risks, riskObjectPage, usersRaw]) => {
         if (cancelled) return
         const rows = buildRuleRows(risks, overrides, currentCategories)
@@ -126,7 +126,7 @@ export function RulesDetailsPage() {
     return () => {
       cancelled = true
     }
-  }, [token, id])
+  }, [token, id, user?.companyId])
 
   const selectedResponsible =
     draft && draft.responsibleUserId

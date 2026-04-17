@@ -123,7 +123,7 @@ export function UsersPage() {
     let cancelled = false
     setLoading(true)
     setError(null)
-    getUsersList(token)
+    getUsersList(token, user?.companyId)
       .then((items) => {
         if (!cancelled) setRows(items as Row[])
       })
@@ -138,7 +138,7 @@ export function UsersPage() {
     return () => {
       cancelled = true
     }
-  }, [token])
+  }, [token, user?.companyId])
 
   useEffect(() => {
     if (!selectedUser) {
@@ -153,7 +153,7 @@ export function UsersPage() {
     let cancelled = false
     setAccessLoading(true)
     setAccessError(null)
-    getUserAccessPermissions(token, selectedUserId)
+    getUserAccessPermissions(token, selectedUserId, user?.companyId)
       .then((permissions) => {
         if (!cancelled) setDraftAccessPermissions(permissions)
       })
@@ -255,6 +255,7 @@ export function UsersPage() {
         token,
         selectedUserId,
         draftAccessPermissions,
+        user?.companyId,
       )
       setRows((prevRows) =>
         prevRows.map((row) =>

@@ -64,7 +64,7 @@ function normalizeUsers(items: unknown[]): UserOption[] {
 
 export function RulesCreatePage() {
   const navigate = useNavigate()
-  const { token, hasPermission } = useAuth()
+  const { token, user, hasPermission } = useAuth()
   const canManageRulesAndRisks = hasPermission('manage_rules_and_risks')
 
   const [name, setName] = useState('')
@@ -117,7 +117,7 @@ export function RulesCreatePage() {
     if (!token) return
     let cancelled = false
     setLoadingUsers(true)
-    getUsersList(token)
+    getUsersList(token, user?.companyId)
       .then((items) => {
         if (cancelled) return
         setUsers(normalizeUsers(items))
@@ -132,7 +132,7 @@ export function RulesCreatePage() {
     return () => {
       cancelled = true
     }
-  }, [token])
+  }, [token, user?.companyId])
 
   const selectedResponsible = useMemo(
     () => users.find((user) => user.id === responsibleUserId) ?? null,

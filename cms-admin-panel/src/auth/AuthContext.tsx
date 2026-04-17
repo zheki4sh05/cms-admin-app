@@ -50,13 +50,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setPermissions([])
       return
     }
-    const [data, nextPermissions] = await Promise.all([getMe(token), getMyPermissions(token)])
+    const data = (await getMe(token)) as AppUser
+    const nextPermissions = await getMyPermissions(token, data.companyId)
     if (data.companyId?.trim()) {
       localStorage.setItem(COMPANY_ID_STORAGE_KEY, data.companyId)
     } else {
       localStorage.removeItem(COMPANY_ID_STORAGE_KEY)
     }
-    setUser(data as AppUser)
+    setUser(data)
     setPermissions(nextPermissions)
   }, [token])
 
@@ -69,10 +70,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     let cancelled = false
     setLoading(true)
-    Promise.all([getMe(token), getMyPermissions(token)])
-      .then(([data, nextPermissions]) => {
+    getMe(token)
+      .then(async (data) => {
+        const nextUser = data as AppUser
+        const nextPermissions = await getMyPermissions(token, nextUser.companyId)
         if (!cancelled) {
-          const nextUser = data as AppUser
           if (nextUser.companyId?.trim()) {
             localStorage.setItem(COMPANY_ID_STORAGE_KEY, nextUser.companyId)
           } else {

@@ -38,16 +38,16 @@ function getStoredCompanyId(): string | null {
   return trimmed ? trimmed : null
 }
 
-function authHeaders(token: string | null): HeadersInit {
+function authHeaders(token: string | null, companyId?: string | null): HeadersInit {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   }
   if (token) {
     headers.Authorization = `Bearer ${token}`
   }
-  const companyId = getStoredCompanyId()
-  if (companyId) {
-    headers.CompanyId = companyId
+  const effectiveCompanyId = companyId?.trim() || getStoredCompanyId()
+  if (effectiveCompanyId) {
+    headers.CompanyId = effectiveCompanyId
   }
   return headers
 }
@@ -88,9 +88,12 @@ export async function getMe(token: string) {
   return data
 }
 
-export async function getMyPermissions(token: string): Promise<AccessPermission[]> {
+export async function getMyPermissions(
+  token: string,
+  companyId?: string | null,
+): Promise<AccessPermission[]> {
   const res = await fetch(apiUrl('me/permissions'), {
-    headers: authHeaders(token),
+    headers: authHeaders(token, companyId),
   })
   const data = (await res.json().catch(() => ({}))) as {
     message?: string
@@ -289,9 +292,9 @@ export async function putIntegrationConfigStatusById(
   return { id: data.id, savedAt: data.savedAt }
 }
 
-export async function getUsersList(token: string) {
+export async function getUsersList(token: string, companyId?: string | null) {
   const res = await fetch(apiUrl('users'), {
-    headers: authHeaders(token),
+    headers: authHeaders(token, companyId),
   })
   const data = (await res.json().catch(() => ({}))) as {
     message?: string
@@ -306,9 +309,10 @@ export async function getUsersList(token: string) {
 export async function getUserAccessPermissions(
   token: string,
   userId: string,
+  companyId?: string | null,
 ): Promise<AccessPermission[]> {
   const res = await fetch(apiUrl(`users/${userId}/access`), {
-    headers: authHeaders(token),
+    headers: authHeaders(token, companyId),
   })
   const data = (await res.json().catch(() => ({}))) as {
     message?: string
@@ -324,10 +328,11 @@ export async function putUserAccessPermissions(
   token: string,
   userId: string,
   accessPermissions: AccessPermission[],
+  companyId?: string | null,
 ): Promise<AccessPermission[]> {
   const res = await fetch(apiUrl(`users/${userId}/access`), {
     method: 'PUT',
-    headers: authHeaders(token),
+    headers: authHeaders(token, companyId),
     body: JSON.stringify({ accessPermissions }),
   })
   const data = (await res.json().catch(() => ({}))) as {

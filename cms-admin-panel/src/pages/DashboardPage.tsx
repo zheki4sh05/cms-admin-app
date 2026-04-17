@@ -35,7 +35,7 @@ export function DashboardPage() {
     setError(null)
     Promise.all([
       getDashboardSummary(token),
-      hasPageAccess('view_users_page') ? getUsersList(token) : Promise.resolve([]),
+      hasPageAccess('view_users_page') ? getUsersList(token, user?.companyId) : Promise.resolve([]),
       hasPageAccess('view_risk_objects_page')
         ? getRiskObjects(token, 1, 500)
         : Promise.resolve({ items: [], hasMore: false }),
