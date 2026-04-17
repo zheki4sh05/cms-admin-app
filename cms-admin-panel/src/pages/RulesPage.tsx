@@ -1,6 +1,8 @@
 import AddIcon from '@mui/icons-material/Add'
 import ClearIcon from '@mui/icons-material/Clear'
+import CloseIcon from '@mui/icons-material/Close'
 import SearchIcon from '@mui/icons-material/Search'
+import TuneOutlinedIcon from '@mui/icons-material/TuneOutlined'
 import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined'
 import {
   Alert,
@@ -20,6 +22,7 @@ import {
   Paper,
   Skeleton,
   Select,
+  Slide,
   Stack,
   Table,
   TableBody,
@@ -80,9 +83,15 @@ export function RulesPage() {
   const [categories] = useState<RiskCategoryOption[]>(() => loadRiskCategories())
   const [ruleOverrides] = useState(() => loadRuleOverrides())
   const [prioritySwitcher, setPrioritySwitcher] = useState<PrioritySwitcherValue>('all')
+  const [ruleNameFilter, setRuleNameFilter] = useState('')
   const [priorityFilter, setPriorityFilter] = useState<PrioritySwitcherValue>('all')
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilterValue>('all')
   const [riskObjectFilter, setRiskObjectFilter] = useState<RiskObjectFilterValue>('all')
+  const [draftRuleNameFilter, setDraftRuleNameFilter] = useState('')
+  const [draftPriorityFilter, setDraftPriorityFilter] = useState<PrioritySwitcherValue>('all')
+  const [draftCategoryFilter, setDraftCategoryFilter] = useState<CategoryFilterValue>('all')
+  const [draftRiskObjectFilter, setDraftRiskObjectFilter] = useState<RiskObjectFilterValue>('all')
+  const [filtersPanelOpen, setFiltersPanelOpen] = useState(false)
   const [historyItems, setHistoryItems] = useState<RuleChangeHistoryEntry[]>([])
   const [historyHasMore, setHistoryHasMore] = useState(true)
   const [historyError, setHistoryError] = useState<string | null>(null)
@@ -195,13 +204,16 @@ export function RulesPage() {
   }, [riskObjects])
 
   const filteredRows = useMemo(() => {
+    const normalizedName = ruleNameFilter.trim().toLowerCase()
     return tableRows.filter((row) => {
+      const passRuleName =
+        normalizedName === '' || row.name.toLowerCase().includes(normalizedName)
       const passPriority = priorityFilter === 'all' || row.priority === priorityFilter
       const passCategory = categoryFilter === 'all' || row.categoryId === categoryFilter
       const passRiskObject = riskObjectFilter === 'all' || row.riskObjectId === riskObjectFilter
-      return passPriority && passCategory && passRiskObject
+      return passRuleName && passPriority && passCategory && passRiskObject
     })
-  }, [categoryFilter, priorityFilter, riskObjectFilter, tableRows])
+  }, [ruleNameFilter, categoryFilter, priorityFilter, riskObjectFilter, tableRows])
 
   function getRowBackground(row: RuleTableRow) {
     if (prioritySwitcher === 'off') {
@@ -237,15 +249,24 @@ export function RulesPage() {
         <Typography variant="h5" component="h1">
           Бизнес-правила для выявления рисков
         </Typography>
-        <Button
-          variant="contained"
-          startIcon={<AddIcon />}
-          size="medium"
-          onClick={() => navigate('/app/rules/new')}
-          disabled={!canManageRulesAndRisks}
-        >
-          Создать
-        </Button>
+        <Stack direction="row" spacing={1} alignItems="center" useFlexGap flexWrap="wrap">
+          <Button
+            variant="outlined"
+            startIcon={<TuneOutlinedIcon />}
+            onClick={() => setFiltersPanelOpen((prev) => !prev)}
+          >
+            {filtersPanelOpen ? 'Скрыть фильтры' : 'Показать фильтры'}
+          </Button>
+          <Button
+            variant="contained"
+            startIcon={<AddIcon />}
+            size="medium"
+            onClick={() => navigate('/app/rules/new')}
+            disabled={!canManageRulesAndRisks}
+          >
+            Создать
+          </Button>
+        </Stack>
       </Box>
       {!canManageRulesAndRisks ? (
         <Alert severity="info" sx={{ mb: 2 }}>
@@ -274,44 +295,307 @@ export function RulesPage() {
       {!loading && error ? <Alert severity="error">{error}</Alert> : null}
 
       {!loading && !error ? (
-        <Stack spacing={2}>
-          <Stack spacing={1}>
-            <Typography variant="subtitle2" color="text.secondary">
-              Фильтр отображения:
-            </Typography>
-            <Stack direction={{ xs: 'column', lg: 'row' }} spacing={1.5}>
-              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ sm: 'center' }}>
-                <Typography variant="body2" color="text.secondary" sx={{ minWidth: { sm: 130 } }}>
-                  Приоритет риска:
-                </Typography>
-                <ToggleButtonGroup
-                  value={priorityFilter}
-                  exclusive
-                  size="small"
-                  onChange={(_, value: PrioritySwitcherValue | null) => {
-                    if (value) setPriorityFilter(value)
-                  }}
-                  aria-label="Фильтр по приоритету риска"
-                >
-                  <ToggleButton value="all">Все</ToggleButton>
-                  <ToggleButton value="low">Низкий</ToggleButton>
-                  <ToggleButton value="medium">Средний</ToggleButton>
-                  <ToggleButton value="high">Высокий</ToggleButton>
-                </ToggleButtonGroup>
-              </Stack>
+        <Box
+          sx={{
+            position: 'relative',
+          }}
+        >
+          <Stack spacing={2}>
+            <TableContainer component={Paper} variant="outlined">
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>ID правила</TableCell>
+                    <TableCell>Название правила</TableCell>
+                    <TableCell>Условие срабатывания</TableCell>
+                    <TableCell>Действие системы</TableCell>
+                    <TableCell>Категория риска</TableCell>
+                    <TableCell>Рисковый объект</TableCell>
+                    <TableCell align="right">Действие</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {filteredRows.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={7}>
+                        <Typography variant="body2" color="text.secondary">
+                          По выбранным фильтрам правил не найдено.
+                        </Typography>
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    filteredRows.map((row) => (
+                      <TableRow
+                        key={row.id}
+                        hover
+                        sx={{
+                          bgcolor: getRowBackground(row),
+                          '&:last-child td, &:last-child th': { border: 0 },
+                        }}
+                      >
+                        <TableCell>{row.id}</TableCell>
+                        <TableCell>
+                          <Stack direction="row" spacing={1} alignItems="center" useFlexGap flexWrap="wrap">
+                            <Typography variant="body2">{row.name}</Typography>
+                            <Chip
+                              size="small"
+                              label={row.enabled ? priorityLabels[row.priority] : 'Отключено'}
+                              color={row.enabled ? 'default' : 'warning'}
+                              variant={row.enabled ? 'outlined' : 'filled'}
+                            />
+                          </Stack>
+                        </TableCell>
+                        <TableCell>{row.condition}</TableCell>
+                        <TableCell>{row.action}</TableCell>
+                        <TableCell>{row.categoryLabel}</TableCell>
+                        <TableCell>
+                          {riskObjectNameById.get(row.riskObjectId) ?? row.riskObjectId ?? 'Не привязан'}
+                        </TableCell>
+                        <TableCell align="right">
+                          <Button
+                            variant="outlined"
+                            size="small"
+                            onClick={() => navigate(`/app/rules/${row.id}`)}
+                          >
+                            Просмотреть
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </TableContainer>
 
-              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ sm: 'center' }}>
-                <Typography variant="body2" color="text.secondary" sx={{ minWidth: { sm: 130 } }}>
-                  Категория:
+            <Typography variant="h6" component="h2" sx={{ mb: 1 }}>
+              История изменений
+            </Typography>
+
+            <Paper variant="outlined" sx={{ mb: 2, px: { xs: 1, sm: 2 }, py: 1.5 }}>
+              <Toolbar
+                disableGutters
+                variant="dense"
+                sx={{ flexWrap: 'wrap', gap: 1.5, minHeight: 'auto', py: 0.5 }}
+              >
+                <TextField
+                  size="small"
+                  placeholder="Поиск по слову…"
+                  value={historySearchInput}
+                  onChange={(e) => setHistorySearchInput(e.target.value)}
+                  sx={{ flex: '1 1 220px', minWidth: 180, maxWidth: 480 }}
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start">
+                        <SearchIcon fontSize="small" color="action" />
+                      </InputAdornment>
+                    ),
+                    endAdornment: historySearchInput ? (
+                      <InputAdornment position="end">
+                        <IconButton
+                          size="small"
+                          aria-label="Очистить поиск"
+                          onClick={() => setHistorySearchInput('')}
+                        >
+                          <ClearIcon fontSize="small" />
+                        </IconButton>
+                      </InputAdornment>
+                    ) : null,
+                  }}
+                />
+              </Toolbar>
+            </Paper>
+
+            {historyError ? (
+              <Alert severity="error" sx={{ mb: 2 }}>
+                {historyError}
+              </Alert>
+            ) : null}
+
+            <Paper variant="outlined" sx={{ overflow: 'hidden' }}>
+              {historyInitialLoading ? (
+                <Box sx={{ maxHeight: 380, overflowY: 'hidden', py: 3, px: 2 }}>
+                  {Array.from({ length: 5 }).map((_, i) => (
+                    <Skeleton key={i} sx={{ my: 1.5 }} height={48} />
+                  ))}
+                </Box>
+              ) : (
+                <Box
+                  ref={historyScrollRef}
+                  sx={{
+                    maxHeight: 380,
+                    overflowY: 'auto',
+                    overflowX: 'hidden',
+                    overscrollBehavior: 'contain',
+                  }}
+                >
+                  {!historyInitialLoading && historyItems.length === 0 ? (
+                    <Box sx={{ py: 5, px: 2, textAlign: 'center' }}>
+                      <Typography color="text.secondary">
+                        Ничего не найдено. Попробуйте другой запрос.
+                      </Typography>
+                    </Box>
+                  ) : (
+                    <List disablePadding>
+                      {historyItems.map((entry, index) => (
+                        <Box key={entry.id}>
+                          {index > 0 ? <Divider component="li" /> : null}
+                          <ListItem
+                            alignItems="flex-start"
+                            sx={{ py: 1.5, px: 2, gap: 1.5, justifyContent: 'space-between' }}
+                          >
+                            <ListItemText
+                              primaryTypographyProps={{ variant: 'subtitle2', fontWeight: 600 }}
+                              primary={entry.ruleName}
+                              secondaryTypographyProps={{ component: 'div' }}
+                              secondary={
+                                <>
+                                  <Typography
+                                    component="div"
+                                    variant="body2"
+                                    sx={{ mt: 0.5, color: 'text.primary' }}
+                                  >
+                                    {entry.description}
+                                  </Typography>
+                                  <Typography
+                                    component="div"
+                                    variant="caption"
+                                    color="text.secondary"
+                                    sx={{ mt: 0.5 }}
+                                  >
+                                    {formatDateTime(entry.changedAt)} · {entry.authorName}
+                                  </Typography>
+                                </>
+                              }
+                            />
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              startIcon={<VisibilityOutlinedIcon fontSize="small" />}
+                              onClick={() =>
+                                entry.ruleId ? navigate(`/app/rules/${entry.ruleId}`) : undefined
+                              }
+                              disabled={!entry.ruleId}
+                            >
+                              Просмотреть
+                            </Button>
+                          </ListItem>
+                        </Box>
+                      ))}
+                    </List>
+                  )}
+
+                  <Box ref={historySentinelRef} sx={{ height: 1, width: '100%' }} aria-hidden />
+
+                  {historyLoadingMore ? (
+                    <Box sx={{ display: 'flex', justifyContent: 'center', py: 2 }}>
+                      <CircularProgress size={28} aria-label="Загрузка" />
+                    </Box>
+                  ) : null}
+
+                  {!historyHasMore && historyItems.length > 0 ? (
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{ display: 'block', textAlign: 'center', pb: 2, px: 2 }}
+                    >
+                      Все записи загружены
+                    </Typography>
+                  ) : null}
+                </Box>
+              )}
+            </Paper>
+          </Stack>
+
+          {filtersPanelOpen ? (
+            <Box
+              onClick={() => setFiltersPanelOpen(false)}
+              sx={{
+                position: 'fixed',
+                inset: 0,
+                bgcolor: 'rgba(0, 0, 0, 0.28)',
+                zIndex: (t) => t.zIndex.drawer + 1,
+              }}
+            />
+          ) : null}
+
+          <Slide
+            direction="left"
+            in={filtersPanelOpen}
+            mountOnEnter
+            unmountOnExit
+            appear
+            timeout={{ enter: 260, exit: 180 }}
+          >
+            <Paper
+              variant="outlined"
+              sx={{
+                p: 2,
+                position: 'fixed',
+                top: { xs: 72, md: 88 },
+                right: { xs: 8, md: 16 },
+                bottom: 16,
+                width: { xs: 'calc(100vw - 16px)', sm: 380, md: 420 },
+                overflowY: 'auto',
+                zIndex: (t) => t.zIndex.drawer + 2,
+                display: 'flex',
+                flexDirection: 'column',
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <Stack spacing={2} sx={{ height: '100%' }}>
+                <Box>
+                  <IconButton
+                    size="small"
+                    aria-label="Закрыть панель фильтров"
+                    onClick={() => setFiltersPanelOpen(false)}
+                    sx={{ color: 'text.secondary' }}
+                  >
+                    <CloseIcon fontSize="small" />
+                  </IconButton>
+                </Box>
+
+                <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                  Фильтры рисков
                 </Typography>
-                <FormControl size="small" sx={{ minWidth: 260 }}>
+
+                <TextField
+                  size="small"
+                  label="Поиск по названию правила"
+                  placeholder="Введите название…"
+                  value={draftRuleNameFilter}
+                  onChange={(e) => setDraftRuleNameFilter(e.target.value)}
+                  fullWidth
+                />
+
+                <Stack spacing={1}>
+                  <Typography variant="body2" color="text.secondary">
+                    Приоритет риска
+                  </Typography>
+                  <ToggleButtonGroup
+                    value={draftPriorityFilter}
+                    exclusive
+                    size="small"
+                    onChange={(_, value: PrioritySwitcherValue | null) => {
+                      if (value) setDraftPriorityFilter(value)
+                    }}
+                    aria-label="Фильтр по приоритету риска"
+                    fullWidth
+                  >
+                    <ToggleButton value="all">Все</ToggleButton>
+                    <ToggleButton value="low">Низкий</ToggleButton>
+                    <ToggleButton value="medium">Средний</ToggleButton>
+                    <ToggleButton value="high">Высокий</ToggleButton>
+                  </ToggleButtonGroup>
+                </Stack>
+
+                <FormControl size="small" fullWidth>
                   <InputLabel id="rules-category-filter-label">Категория риска</InputLabel>
                   <Select
                     labelId="rules-category-filter-label"
                     label="Категория риска"
-                    value={categoryFilter}
+                    value={draftCategoryFilter}
                     onChange={(event) => {
-                      setCategoryFilter(event.target.value as CategoryFilterValue)
+                      setDraftCategoryFilter(event.target.value as CategoryFilterValue)
                     }}
                   >
                     <MenuItem value="all">Все категории</MenuItem>
@@ -322,20 +606,15 @@ export function RulesPage() {
                     ))}
                   </Select>
                 </FormControl>
-              </Stack>
 
-              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ sm: 'center' }}>
-                <Typography variant="body2" color="text.secondary" sx={{ minWidth: { sm: 130 } }}>
-                  Рисковый объект:
-                </Typography>
-                <FormControl size="small" sx={{ minWidth: 320 }}>
+                <FormControl size="small" fullWidth>
                   <InputLabel id="rules-risk-object-filter-label">Рисковый объект</InputLabel>
                   <Select
                     labelId="rules-risk-object-filter-label"
                     label="Рисковый объект"
-                    value={riskObjectFilter}
+                    value={draftRiskObjectFilter}
                     onChange={(event) => {
-                      setRiskObjectFilter(event.target.value as RiskObjectFilterValue)
+                      setDraftRiskObjectFilter(event.target.value as RiskObjectFilterValue)
                     }}
                   >
                     <MenuItem value="all">Все рисковые объекты</MenuItem>
@@ -346,240 +625,65 @@ export function RulesPage() {
                     ))}
                   </Select>
                 </FormControl>
-              </Stack>
-            </Stack>
-          </Stack>
 
-          <Stack
-            direction={{ xs: 'column', md: 'row' }}
-            justifyContent="space-between"
-            alignItems={{ xs: 'flex-start', md: 'center' }}
-            spacing={1.5}
-          >
-            <Typography variant="subtitle2" color="text.secondary">
-              Подсветка приоритета:
-            </Typography>
-            <ToggleButtonGroup
-              value={prioritySwitcher}
-              exclusive
-              size="small"
-              onChange={(_, value: PrioritySwitcherValue | null) => {
-                if (value) setPrioritySwitcher(value)
-              }}
-              aria-label="Подсветка приоритета"
-            >
-              <ToggleButton value="off">Отключить</ToggleButton>
-              <ToggleButton value="all">Все</ToggleButton>
-              <ToggleButton value="low">Низкий</ToggleButton>
-              <ToggleButton value="medium">Средний</ToggleButton>
-              <ToggleButton value="high">Высокий</ToggleButton>
-            </ToggleButtonGroup>
-          </Stack>
+                <Divider />
 
-          <TableContainer component={Paper} variant="outlined">
-            <Table size="small">
-              <TableHead>
-                <TableRow>
-                  <TableCell>ID правила</TableCell>
-                  <TableCell>Название правила</TableCell>
-                  <TableCell>Условие срабатывания</TableCell>
-                  <TableCell>Действие системы</TableCell>
-                  <TableCell>Категория риска</TableCell>
-                  <TableCell>Рисковый объект</TableCell>
-                  <TableCell align="right">Действие</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {filteredRows.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={7}>
-                      <Typography variant="body2" color="text.secondary">
-                        По выбранным фильтрам правил не найдено.
-                      </Typography>
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  filteredRows.map((row) => (
-                    <TableRow
-                      key={row.id}
-                      hover
-                      sx={{
-                        bgcolor: getRowBackground(row),
-                        '&:last-child td, &:last-child th': { border: 0 },
+                <Stack spacing={1}>
+                  <Typography variant="body2" color="text.secondary">
+                    Подсветка приоритета
+                  </Typography>
+                  <ToggleButtonGroup
+                    value={prioritySwitcher}
+                    exclusive
+                    size="small"
+                    onChange={(_, value: PrioritySwitcherValue | null) => {
+                      if (value) setPrioritySwitcher(value)
+                    }}
+                    aria-label="Подсветка приоритета"
+                    fullWidth
+                  >
+                    <ToggleButton value="off">Откл</ToggleButton>
+                    <ToggleButton value="all">Все</ToggleButton>
+                    <ToggleButton value="low">Низк</ToggleButton>
+                    <ToggleButton value="medium">Средн</ToggleButton>
+                    <ToggleButton value="high">Высок</ToggleButton>
+                  </ToggleButtonGroup>
+                </Stack>
+
+                <Box sx={{ mt: 'auto' }}>
+                  <Divider sx={{ mb: 1.5 }} />
+                  <Stack direction="row" spacing={1}>
+                    <Button
+                      variant="contained"
+                      fullWidth
+                      onClick={() => {
+                        setRuleNameFilter(draftRuleNameFilter)
+                        setPriorityFilter(draftPriorityFilter)
+                        setCategoryFilter(draftCategoryFilter)
+                        setRiskObjectFilter(draftRiskObjectFilter)
+                        setFiltersPanelOpen(false)
                       }}
                     >
-                      <TableCell>{row.id}</TableCell>
-                      <TableCell>
-                        <Stack direction="row" spacing={1} alignItems="center" useFlexGap flexWrap="wrap">
-                          <Typography variant="body2">{row.name}</Typography>
-                          <Chip
-                            size="small"
-                            label={row.enabled ? priorityLabels[row.priority] : 'Отключено'}
-                            color={row.enabled ? 'default' : 'warning'}
-                            variant={row.enabled ? 'outlined' : 'filled'}
-                          />
-                        </Stack>
-                      </TableCell>
-                      <TableCell>{row.condition}</TableCell>
-                      <TableCell>{row.action}</TableCell>
-                      <TableCell>{row.categoryLabel}</TableCell>
-                      <TableCell>
-                        {riskObjectNameById.get(row.riskObjectId) ?? row.riskObjectId ?? 'Не привязан'}
-                      </TableCell>
-                      <TableCell align="right">
-                        <Button
-                          variant="outlined"
-                          size="small"
-                          onClick={() => navigate(`/app/rules/${row.id}`)}
-                        >
-                          Просмотреть
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </TableContainer>
-
-          <Typography variant="h6" component="h2" sx={{ mb: 1 }}>
-            История изменений
-          </Typography>
-
-          <Paper variant="outlined" sx={{ mb: 2, px: { xs: 1, sm: 2 }, py: 1.5 }}>
-            <Toolbar
-              disableGutters
-              variant="dense"
-              sx={{ flexWrap: 'wrap', gap: 1.5, minHeight: 'auto', py: 0.5 }}
-            >
-              <TextField
-                size="small"
-                placeholder="Поиск по слову…"
-                value={historySearchInput}
-                onChange={(e) => setHistorySearchInput(e.target.value)}
-                sx={{ flex: '1 1 220px', minWidth: 180, maxWidth: 480 }}
-                InputProps={{
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <SearchIcon fontSize="small" color="action" />
-                    </InputAdornment>
-                  ),
-                  endAdornment: historySearchInput ? (
-                    <InputAdornment position="end">
-                      <IconButton
-                        size="small"
-                        aria-label="Очистить поиск"
-                        onClick={() => setHistorySearchInput('')}
-                      >
-                        <ClearIcon fontSize="small" />
-                      </IconButton>
-                    </InputAdornment>
-                  ) : null,
-                }}
-              />
-            </Toolbar>
-          </Paper>
-
-          {historyError ? (
-            <Alert severity="error" sx={{ mb: 2 }}>
-              {historyError}
-            </Alert>
-          ) : null}
-
-          <Paper variant="outlined" sx={{ overflow: 'hidden' }}>
-            {historyInitialLoading ? (
-              <Box sx={{ maxHeight: 380, overflowY: 'hidden', py: 3, px: 2 }}>
-                {Array.from({ length: 5 }).map((_, i) => (
-                  <Skeleton key={i} sx={{ my: 1.5 }} height={48} />
-                ))}
-              </Box>
-            ) : (
-              <Box
-                ref={historyScrollRef}
-                sx={{
-                  maxHeight: 380,
-                  overflowY: 'auto',
-                  overflowX: 'hidden',
-                  overscrollBehavior: 'contain',
-                }}
-              >
-                {!historyInitialLoading && historyItems.length === 0 ? (
-                  <Box sx={{ py: 5, px: 2, textAlign: 'center' }}>
-                    <Typography color="text.secondary">
-                      Ничего не найдено. Попробуйте другой запрос.
-                    </Typography>
-                  </Box>
-                ) : (
-                  <List disablePadding>
-                    {historyItems.map((entry, index) => (
-                      <Box key={entry.id}>
-                        {index > 0 ? <Divider component="li" /> : null}
-                        <ListItem
-                          alignItems="flex-start"
-                          sx={{ py: 1.5, px: 2, gap: 1.5, justifyContent: 'space-between' }}
-                        >
-                          <ListItemText
-                            primaryTypographyProps={{ variant: 'subtitle2', fontWeight: 600 }}
-                            primary={entry.ruleName}
-                            secondaryTypographyProps={{ component: 'div' }}
-                            secondary={
-                              <>
-                                <Typography
-                                  component="div"
-                                  variant="body2"
-                                  sx={{ mt: 0.5, color: 'text.primary' }}
-                                >
-                                  {entry.description}
-                                </Typography>
-                                <Typography
-                                  component="div"
-                                  variant="caption"
-                                  color="text.secondary"
-                                  sx={{ mt: 0.5 }}
-                                >
-                                  {formatDateTime(entry.changedAt)} · {entry.authorName}
-                                </Typography>
-                              </>
-                            }
-                          />
-                          <Button
-                            size="small"
-                            variant="outlined"
-                            startIcon={<VisibilityOutlinedIcon fontSize="small" />}
-                            onClick={() =>
-                              entry.ruleId ? navigate(`/app/rules/${entry.ruleId}`) : undefined
-                            }
-                            disabled={!entry.ruleId}
-                          >
-                            Просмотреть
-                          </Button>
-                        </ListItem>
-                      </Box>
-                    ))}
-                  </List>
-                )}
-
-                <Box ref={historySentinelRef} sx={{ height: 1, width: '100%' }} aria-hidden />
-
-                {historyLoadingMore ? (
-                  <Box sx={{ display: 'flex', justifyContent: 'center', py: 2 }}>
-                    <CircularProgress size={28} aria-label="Загрузка" />
-                  </Box>
-                ) : null}
-
-                {!historyHasMore && historyItems.length > 0 ? (
-                  <Typography
-                    variant="caption"
-                    color="text.secondary"
-                    sx={{ display: 'block', textAlign: 'center', pb: 2, px: 2 }}
-                  >
-                    Все записи загружены
-                  </Typography>
-                ) : null}
-              </Box>
-            )}
-          </Paper>
-        </Stack>
+                      Найти
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      fullWidth
+                      onClick={() => {
+                        setDraftRuleNameFilter('')
+                        setDraftPriorityFilter('all')
+                        setDraftCategoryFilter('all')
+                        setDraftRiskObjectFilter('all')
+                      }}
+                    >
+                      Сбросить
+                    </Button>
+                  </Stack>
+                </Box>
+              </Stack>
+            </Paper>
+          </Slide>
+        </Box>
       ) : null}
     </Box>
   )

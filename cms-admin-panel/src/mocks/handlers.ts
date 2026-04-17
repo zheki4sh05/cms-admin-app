@@ -2,7 +2,19 @@ import { delay, http, HttpResponse } from 'msw'
 import type { AccessPermission } from '../types/permissions'
 import type { AppUser } from '../types/user'
 
-const MOCK_TOKEN = 'mock-trustflow-admin-token'
+let MOCK_TOKEN = 'mock-trustflow-admin-token'
+let MOCK_REFRESH_TOKEN = 'mock-trustflow-admin-refresh-token'
+let mockTokenVersion = 0
+
+function issueMockTokens() {
+  mockTokenVersion += 1
+  MOCK_TOKEN = `mock-trustflow-admin-token-${mockTokenVersion}`
+  MOCK_REFRESH_TOKEN = `mock-trustflow-admin-refresh-token-${mockTokenVersion}`
+  return {
+    accessToken: MOCK_TOKEN,
+    refreshToken: MOCK_REFRESH_TOKEN,
+  }
+}
 
 const adminUser: AppUser = {
   id: '1',
@@ -109,6 +121,13 @@ const demoAuthAccounts = [
     password: 'top123',
     user: topManagerUser,
     permissions: topManagerPermissions,
+  },
+] as const
+
+const mockCompanies = [
+  {
+    id: 'company-trustflow-001',
+    name: 'Trustflow LLC',
   },
 ] as const
 
@@ -630,7 +649,7 @@ function parseAuth(request: Request): string | null {
 }
 
 export const handlers = [
-  http.post('/api/auth/login', async ({ request }) => {
+  http.post('/api/auth/admin/login', async ({ request }) => {
     await delay(450)
     const body = (await request.json()) as {
       email?: string
@@ -645,8 +664,10 @@ export const handlers = [
     )
     if (account) {
       currentAuthAccount = account
+      const tokens = issueMockTokens()
       return HttpResponse.json({
-        accessToken: MOCK_TOKEN,
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
         user: account.user,
       })
     }
@@ -655,6 +676,18 @@ export const handlers = [
       { message: 'Неверный email или пароль' },
       { status: 401 },
     )
+  }),
+
+  http.post('/api/auth/admin/refresh', async ({ request }) => {
+    await delay(250)
+    const body = (await request.json()) as {
+      refreshToken?: string
+    }
+    if (!body.refreshToken || body.refreshToken !== MOCK_REFRESH_TOKEN) {
+      return HttpResponse.json({ message: 'Сессия истекла' }, { status: 401 })
+    }
+    const tokens = issueMockTokens()
+    return HttpResponse.json(tokens)
   }),
 
   http.get('/api/me', async ({ request }) => {
@@ -673,6 +706,24 @@ export const handlers = [
       return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
     }
     return HttpResponse.json({ items: currentAuthAccount.permissions })
+  }),
+
+  http.get('/api/companies/by-employee/:employeeId', async ({ request, params }) => {
+    await delay(220)
+    const token = parseAuth(request)
+    if (token !== MOCK_TOKEN) {
+      return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
+    }
+    const employeeId = String(params.employeeId ?? '')
+    const employee = demoAuthAccounts.find((item) => item.user.id === employeeId)
+    if (!employee) {
+      return HttpResponse.json({ message: 'Сотрудник не найден' }, { status: 404 })
+    }
+    const company = mockCompanies.find((item) => item.id === employee.user.companyId)
+    if (!company) {
+      return HttpResponse.json({ message: 'Компания не найдена' }, { status: 404 })
+    }
+    return HttpResponse.json(company)
   }),
 
   http.get('/api/dashboard/summary', async ({ request }) => {

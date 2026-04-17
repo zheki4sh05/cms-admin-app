@@ -28,8 +28,78 @@ import type {
   RuleChangeHistoryPage,
 } from '../types/risks'
 import type { AccessPermission } from '../types/permissions'
+import type { Company } from '../types/company'
 
 const COMPANY_ID_STORAGE_KEY = 'trustflow_company_id'
+const REFRESH_ENDPOINT_PATH = '/auth/admin/refresh'
+
+type RefreshAccessTokenHandler = (failedAccessToken: string) => Promise<string | null>
+
+let refreshAccessTokenHandler: RefreshAccessTokenHandler | null = null
+
+export function setRefreshAccessTokenHandler(handler: RefreshAccessTokenHandler | null) {
+  refreshAccessTokenHandler = handler
+}
+
+const nativeFetch: typeof globalThis.fetch = (input, init) => globalThis.fetch(input, init)
+
+function getHeaderValue(headers: HeadersInit | undefined, key: string): string | null {
+  if (!headers) return null
+  if (headers instanceof Headers) {
+    return headers.get(key)
+  }
+  if (Array.isArray(headers)) {
+    const pair = headers.find(([name]) => name.toLowerCase() === key.toLowerCase())
+    return pair?.[1] ?? null
+  }
+  const recordKey = Object.keys(headers).find((name) => name.toLowerCase() === key.toLowerCase())
+  return recordKey ? headers[recordKey] ?? null : null
+}
+
+function extractBearerToken(headers: HeadersInit | undefined): string | null {
+  const raw = getHeaderValue(headers, 'Authorization')
+  if (!raw?.startsWith('Bearer ')) return null
+  return raw.slice('Bearer '.length).trim() || null
+}
+
+function isRefreshRequest(input: RequestInfo | URL): boolean {
+  const value =
+    typeof input === 'string'
+      ? input
+      : input instanceof URL
+        ? input.toString()
+        : input.url
+  return value.includes(REFRESH_ENDPOINT_PATH)
+}
+
+async function fetchWithRefresh(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const response = await nativeFetch(input, init)
+  if (response.status !== 401 || !refreshAccessTokenHandler || isRefreshRequest(input)) {
+    return response
+  }
+
+  const failedAccessToken = extractBearerToken(init?.headers)
+  if (!failedAccessToken) {
+    return response
+  }
+
+  let nextAccessToken: string | null = null
+  try {
+    nextAccessToken = await refreshAccessTokenHandler(failedAccessToken)
+  } catch {
+    return response
+  }
+
+  if (!nextAccessToken) {
+    return response
+  }
+
+  const retryHeaders = new Headers(init?.headers)
+  retryHeaders.set('Authorization', `Bearer ${nextAccessToken}`)
+  return nativeFetch(input, { ...init, headers: retryHeaders })
+}
+
+const fetch: typeof globalThis.fetch = (input, init) => fetchWithRefresh(input, init)
 
 function getStoredCompanyId(): string | null {
   if (typeof window === 'undefined') return null
@@ -53,7 +123,7 @@ function authHeaders(token: string | null, companyId?: string | null): HeadersIn
 }
 
 export async function postLogin(email: string, password: string) {
-  const res = await fetch(apiUrl('auth/login'), {
+  const res = await fetch(apiUrl('auth/admin/login'), {
     method: 'POST',
     headers: authHeaders(null),
     body: JSON.stringify({ email, password }),
@@ -61,17 +131,42 @@ export async function postLogin(email: string, password: string) {
   const data = (await res.json().catch(() => ({}))) as {
     message?: string
     accessToken?: string
+    refreshToken?: string
     user?: unknown
   }
   if (!res.ok) {
     throw new Error(data.message ?? 'Ошибка входа')
   }
-  if (!data.accessToken || !data.user) {
+  if (!data.accessToken || !data.refreshToken || !data.user) {
     throw new Error('Некорректный ответ сервера')
   }
   return {
     accessToken: data.accessToken,
+    refreshToken: data.refreshToken,
     user: data.user,
+  }
+}
+
+export async function postRefreshToken(refreshToken: string) {
+  const res = await fetch(apiUrl('auth/admin/refresh'), {
+    method: 'POST',
+    headers: authHeaders(null),
+    body: JSON.stringify({ refreshToken }),
+  })
+  const data = (await res.json().catch(() => ({}))) as {
+    message?: string
+    accessToken?: string
+    refreshToken?: string
+  }
+  if (!res.ok) {
+    throw new Error(data.message ?? 'Сессия истекла')
+  }
+  if (!data.accessToken || !data.refreshToken) {
+    throw new Error('Некорректный ответ сервера')
+  }
+  return {
+    accessToken: data.accessToken,
+    refreshToken: data.refreshToken,
   }
 }
 
@@ -88,22 +183,51 @@ export async function getMe(token: string) {
   return data
 }
 
-export async function getMyPermissions(
+export async function getCompanyByEmployeeId(
   token: string,
-  companyId?: string | null,
-): Promise<AccessPermission[]> {
-  const res = await fetch(apiUrl('me/permissions'), {
-    headers: authHeaders(token, companyId),
+  employeeId: string,
+): Promise<Company> {
+  const res = await fetch(apiUrl(`companies/by-employee/${employeeId}`), {
+    headers: authHeaders(token),
   })
   const data = (await res.json().catch(() => ({}))) as {
     message?: string
-    items?: AccessPermission[]
+    id?: string
+    name?: string
   }
   if (!res.ok) {
-    throw new Error(data.message ?? 'Ошибка загрузки прав доступа')
+    throw new Error(data.message ?? 'Ошибка загрузки компании')
   }
-  return data.items ?? []
+  if (!data.id || !data.name) {
+    throw new Error('Некорректный ответ сервера')
+  }
+  return {
+    id: data.id,
+    name: data.name,
+  }
 }
+
+export async function getMyPermissions(token: string): Promise<AccessPermission[]> {
+  const res = await fetch(apiUrl('me/permissions'), {
+    headers: authHeaders(token),
+  })
+  const data = (await res.json().catch(() => ({}))) as {
+    message?: string
+    id?: string
+    name?: string
+  }
+  if (!res.ok) {
+    throw new Error(data.message ?? 'Ошибка загрузки компании')
+  }
+  if (!data.id || !data.name) {
+    throw new Error('Некорректный ответ сервера')
+  }
+  return {
+    id: data.id,
+    name: data.name,
+  }
+}
+
 
 export async function getDashboardSummary(token: string) {
   const res = await fetch(apiUrl('dashboard/summary'), {

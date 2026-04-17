@@ -26,10 +26,11 @@ import PersonOutlinedIcon from '@mui/icons-material/PersonOutlined'
 import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined'
 import ShieldOutlinedIcon from '@mui/icons-material/ShieldOutlined'
 import { alpha, useTheme } from '@mui/material/styles'
-import { useState, type ElementType } from 'react'
+import { useEffect, useState, type ElementType } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { AppLogo } from '../components/AppLogo'
 import { useAuth } from '../auth/AuthContext'
+import { getCompanyByEmployeeId } from '../api/client'
 import { canViewPage, type AccessPermission, type PageViewPermission } from '../types/permissions'
 
 const drawerWidth = 260
@@ -231,7 +232,8 @@ export function AdminLayout() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [sidebarExpanded, setSidebarExpanded] = useState(true)
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null)
-  const { user, permissions, loading, logout } = useAuth()
+  const [companyName, setCompanyName] = useState<string | null>(null)
+  const { token, user, permissions, loading, logout } = useAuth()
   const navigate = useNavigate()
 
   const initials = user?.name
@@ -246,6 +248,28 @@ export function AdminLayout() {
     logout()
     navigate('/login', { replace: true })
   }
+
+  useEffect(() => {
+    if (!token || !user?.id?.trim()) {
+      setCompanyName(null)
+      return
+    }
+    let cancelled = false
+    getCompanyByEmployeeId(token, user.id.trim())
+      .then((company) => {
+        if (!cancelled) {
+          setCompanyName(company.name)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setCompanyName(null)
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [token, user?.id])
 
   const drawerTransition = theme.transitions.create(['width', 'margin'], {
     easing: theme.transitions.easing.sharp,
@@ -363,6 +387,9 @@ export function AdminLayout() {
           <Box sx={{ flexGrow: 1 }} />
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
             <Box sx={{ textAlign: 'right', display: { xs: 'none', sm: 'block' } }}>
+              <Typography variant="caption" color="text.secondary">
+                {companyName ?? 'Компания не указана'}
+              </Typography>
               <Typography variant="body2" sx={{ lineHeight: 1.2 }}>
                 {user?.name}
               </Typography>
