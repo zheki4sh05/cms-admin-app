@@ -135,7 +135,7 @@ let currentAuthAccount =
   demoAuthAccounts.find((account) => account.user.email === adminUser.email) ??
   demoAuthAccounts[0]
 
-let mockUsers: Array<{
+const mockUsers: Array<{
   id: string
   name: string
   email: string
@@ -422,7 +422,16 @@ function defaultRiskDefinition(name: string): Record<string, unknown> {
   }
 }
 
-let mockRiskObjects = [
+type MockRiskObject = {
+  id: string
+  code: string
+  name: string
+  status: 'active' | 'archived'
+  updatedAt: string
+  definition: Record<string, unknown>
+}
+
+let mockRiskObjects: MockRiskObject[] = [
   {
     id: 'ro-1',
     code: 'RO-001',
@@ -544,6 +553,66 @@ let mockRisks = [
   },
 ]
 
+let mockRiskCategories = [
+  { id: 'financial', name: 'Финансовый' },
+  { id: 'reputational', name: 'Репутационный' },
+  { id: 'operational', name: 'Операционный' },
+]
+
+type MockRuleOverride = {
+  riskObjectId?: string
+  mechanismScriptName?: string
+  mechanismScriptContent?: string
+  categoryId?: string
+  priority?: 'low' | 'medium' | 'high'
+  responsibleUserId?: string
+  actions?: Array<'createIncident' | 'sendNotification'>
+  enabled?: boolean
+}
+
+let mockRuleOverrides: Record<string, MockRuleOverride> = {}
+
+const rulePriorityPattern: Array<'high' | 'medium' | 'low'> = ['high', 'medium', 'low']
+
+const fallbackActionByCategory: Record<'financial' | 'reputational' | 'operational', string> = {
+  financial: 'Отправить объект на расширенную финансовую проверку',
+  reputational: 'Добавить объект в мониторинг новостного фона',
+  operational: 'Создать задачу комплаенс-аналитику',
+}
+
+const actionLabelByCode: Record<'createIncident' | 'sendNotification', string> = {
+  createIncident: 'Создать инцидент',
+  sendNotification: 'Отправить уведомление',
+}
+
+function buildMockRulesTableRows() {
+  return mockRisks.map((risk, index) => {
+    const override = mockRuleOverrides[risk.id] ?? {}
+    const categoryId = override.categoryId ?? risk.category
+    const categoryLabel = mockRiskCategories.find((item) => item.id === categoryId)?.name ?? categoryId
+    const riskObjectId = override.riskObjectId ?? risk.riskObjectId
+
+    const action =
+      (override.actions ?? []).length > 0
+        ? (override.actions ?? []).map((item) => actionLabelByCode[item]).join(', ')
+        : fallbackActionByCategory[
+            isRiskCategory(categoryId) ? categoryId : 'operational'
+          ]
+
+    return {
+      id: risk.id,
+      name: risk.name,
+      condition: risk.description,
+      action,
+      categoryId,
+      categoryLabel,
+      priority: override.priority ?? rulePriorityPattern[index % rulePriorityPattern.length],
+      enabled: override.enabled ?? index % 5 !== 4,
+      riskObjectId,
+    }
+  })
+}
+
 const RULE_HISTORY_TEMPLATES = [
   {
     ruleName: 'Падение платёжной дисциплины',
@@ -646,6 +715,10 @@ function parseAuth(request: Request): string | null {
   const header = request.headers.get('Authorization')
   if (!header?.startsWith('Bearer ')) return null
   return header.slice('Bearer '.length)
+}
+
+function isRiskCategory(categoryId: string): categoryId is 'financial' | 'reputational' | 'operational' {
+  return categoryId === 'financial' || categoryId === 'reputational' || categoryId === 'operational'
 }
 
 export const handlers = [
@@ -1055,6 +1128,132 @@ export const handlers = [
     return HttpResponse.json({ id: row.id, name: row.name, definition: row.definition })
   }),
 
+  http.get('/api/risk-categories', async ({ request }) => {
+    await delay(180)
+    const token = parseAuth(request)
+    if (token !== MOCK_TOKEN) {
+      return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
+    }
+    return HttpResponse.json({ items: mockRiskCategories })
+  }),
+
+  http.post('/api/risk-categories', async ({ request }) => {
+    await delay(220)
+    const token = parseAuth(request)
+    if (token !== MOCK_TOKEN) {
+      return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
+    }
+    const body = (await request.json().catch(() => ({}))) as { name?: unknown }
+    const name = typeof body.name === 'string' ? body.name.trim() : ''
+    if (!name) {
+      return HttpResponse.json({ message: 'Введите название категории' }, { status: 400 })
+    }
+    const duplicate = mockRiskCategories.some((item) => item.name.toLowerCase() === name.toLowerCase())
+    if (duplicate) {
+      return HttpResponse.json(
+        { message: 'Категория с таким названием уже существует' },
+        { status: 409 },
+      )
+    }
+    const id = `cat-${Date.now()}`
+    const created = { id, name }
+    mockRiskCategories = [...mockRiskCategories, created]
+    return HttpResponse.json(created, { status: 201 })
+  }),
+
+  http.put('/api/risk-categories/:id', async ({ request, params }) => {
+    await delay(220)
+    const token = parseAuth(request)
+    if (token !== MOCK_TOKEN) {
+      return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
+    }
+    const id = String(params.id ?? '')
+    const idx = mockRiskCategories.findIndex((item) => item.id === id)
+    if (idx < 0) {
+      return HttpResponse.json({ message: 'Категория не найдена' }, { status: 404 })
+    }
+    const body = (await request.json().catch(() => ({}))) as { name?: unknown }
+    const name = typeof body.name === 'string' ? body.name.trim() : ''
+    if (!name) {
+      return HttpResponse.json({ message: 'Название категории не может быть пустым' }, { status: 400 })
+    }
+    const duplicate = mockRiskCategories.some(
+      (item) => item.id !== id && item.name.toLowerCase() === name.toLowerCase(),
+    )
+    if (duplicate) {
+      return HttpResponse.json(
+        { message: 'Категория с таким названием уже существует' },
+        { status: 409 },
+      )
+    }
+    mockRiskCategories[idx] = { ...mockRiskCategories[idx], name }
+    return HttpResponse.json(mockRiskCategories[idx])
+  }),
+
+  http.delete('/api/risk-categories/:id', async ({ request, params }) => {
+    await delay(200)
+    const token = parseAuth(request)
+    if (token !== MOCK_TOKEN) {
+      return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
+    }
+    const id = String(params.id ?? '')
+    const exists = mockRiskCategories.some((item) => item.id === id)
+    if (!exists) {
+      return HttpResponse.json({ message: 'Категория не найдена' }, { status: 404 })
+    }
+    mockRiskCategories = mockRiskCategories.filter((item) => item.id !== id)
+    return new HttpResponse(null, { status: 204 })
+  }),
+
+  http.get('/api/rules/overrides', async ({ request }) => {
+    await delay(200)
+    const token = parseAuth(request)
+    if (token !== MOCK_TOKEN) {
+      return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
+    }
+    return HttpResponse.json({ items: mockRuleOverrides })
+  }),
+
+  http.put('/api/rules/overrides/:ruleId', async ({ request, params }) => {
+    await delay(240)
+    const token = parseAuth(request)
+    if (token !== MOCK_TOKEN) {
+      return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
+    }
+    const ruleId = String(params.ruleId ?? '')
+    const riskExists = mockRisks.some((item) => item.id === ruleId)
+    if (!riskExists) {
+      return HttpResponse.json({ message: 'Правило не найдено' }, { status: 404 })
+    }
+    const body = (await request.json().catch(() => ({}))) as MockRuleOverride
+    const next: MockRuleOverride = {
+      riskObjectId: typeof body.riskObjectId === 'string' ? body.riskObjectId : '',
+      mechanismScriptName:
+        typeof body.mechanismScriptName === 'string' ? body.mechanismScriptName : '',
+      mechanismScriptContent:
+        typeof body.mechanismScriptContent === 'string' ? body.mechanismScriptContent : '',
+      categoryId: typeof body.categoryId === 'string' ? body.categoryId : undefined,
+      priority:
+        body.priority === 'low' || body.priority === 'medium' || body.priority === 'high'
+          ? body.priority
+          : undefined,
+      responsibleUserId:
+        typeof body.responsibleUserId === 'string' ? body.responsibleUserId : '',
+      actions: Array.isArray(body.actions)
+        ? body.actions.filter(
+            (item): item is 'createIncident' | 'sendNotification' =>
+              item === 'createIncident' || item === 'sendNotification',
+          )
+        : [],
+      enabled: typeof body.enabled === 'boolean' ? body.enabled : undefined,
+    }
+    mockRuleOverrides = {
+      ...mockRuleOverrides,
+      [ruleId]: next,
+    }
+    return HttpResponse.json({ item: next })
+  }),
+
   http.get('/api/risks', async ({ request }) => {
     await delay(220)
     const token = parseAuth(request)
@@ -1108,6 +1307,82 @@ export const handlers = [
       },
       ...mockRisks,
     ]
+    return HttpResponse.json({ id, savedAt: new Date().toISOString() }, { status: 201 })
+  }),
+
+  http.get('/api/rules', async ({ request }) => {
+    await delay(240)
+    const token = parseAuth(request)
+    if (token !== MOCK_TOKEN) {
+      return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
+    }
+    return HttpResponse.json({ items: buildMockRulesTableRows() })
+  }),
+
+  http.post('/api/rules', async ({ request }) => {
+    await delay(260)
+    const token = parseAuth(request)
+    if (token !== MOCK_TOKEN) {
+      return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
+    }
+    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>
+    const name = typeof body.name === 'string' ? body.name.trim() : ''
+    const condition = typeof body.condition === 'string' ? body.condition.trim() : ''
+    const categoryId = typeof body.categoryId === 'string' ? body.categoryId.trim() : ''
+    const riskObjectId = typeof body.riskObjectId === 'string' ? body.riskObjectId.trim() : ''
+    if (!name || !condition || !categoryId) {
+      return HttpResponse.json({ message: 'Заполните обязательные поля правила' }, { status: 400 })
+    }
+    const categoryExists = mockRiskCategories.some((item) => item.id === categoryId)
+    if (!categoryExists) {
+      return HttpResponse.json({ message: 'Категория риска не найдена' }, { status: 404 })
+    }
+    if (riskObjectId) {
+      const riskObjectExists = mockRiskObjects.some((item) => item.id === riskObjectId)
+      if (!riskObjectExists) {
+        return HttpResponse.json({ message: 'Рисковый объект не найден' }, { status: 404 })
+      }
+    }
+    const id = `risk-${Date.now()}`
+    const fallbackCategory: 'financial' | 'reputational' | 'operational' = isRiskCategory(categoryId)
+      ? categoryId
+      : 'operational'
+    mockRisks = [
+      {
+        id,
+        category: fallbackCategory,
+        name,
+        description: condition,
+        riskObjectId,
+      },
+      ...mockRisks,
+    ]
+
+    mockRuleOverrides = {
+      ...mockRuleOverrides,
+      [id]: {
+        categoryId,
+        riskObjectId,
+        priority:
+          body.priority === 'low' || body.priority === 'medium' || body.priority === 'high'
+            ? body.priority
+            : 'medium',
+        responsibleUserId:
+          typeof body.responsibleUserId === 'string' ? body.responsibleUserId : '',
+        actions: Array.isArray(body.actions)
+          ? body.actions.filter(
+              (item): item is 'createIncident' | 'sendNotification' =>
+                item === 'createIncident' || item === 'sendNotification',
+            )
+          : [],
+        enabled: typeof body.enabled === 'boolean' ? body.enabled : false,
+        mechanismScriptName:
+          typeof body.mechanismScriptName === 'string' ? body.mechanismScriptName : '',
+        mechanismScriptContent:
+          typeof body.mechanismScriptContent === 'string' ? body.mechanismScriptContent : '',
+      },
+    }
+
     return HttpResponse.json({ id, savedAt: new Date().toISOString() }, { status: 201 })
   }),
 

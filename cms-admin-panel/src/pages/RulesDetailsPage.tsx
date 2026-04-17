@@ -24,16 +24,21 @@ import {
 } from '@mui/material'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { getRiskObjectById, getRiskObjects, getRisks, getUsersList } from '../api/client'
+import {
+  getRiskCategories,
+  getRiskObjectById,
+  getRiskObjects,
+  getRisks,
+  getRuleOverrides,
+  getUsersList,
+  putRuleOverrideById,
+} from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import type { RiskObject, RiskObjectDetails } from '../types/riskObjects'
 import {
   actionLabels,
   buildRuleRows,
-  loadRiskCategories,
-  loadRuleOverrides,
   priorityLabels,
-  saveRuleOverride,
   type RiskCategoryOption,
   type RuleAction,
   type RuleEditorDraft,
@@ -65,12 +70,13 @@ function normalizeUsers(items: unknown[]): UserOption[] {
 export function RulesDetailsPage() {
   const navigate = useNavigate()
   const { id = '' } = useParams()
-  const { token, hasPermission } = useAuth()
+  const { token, user, hasPermission } = useAuth()
   const canManageRulesAndRisks = hasPermission('manage_rules_and_risks')
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [saveInfo, setSaveInfo] = useState<string | null>(null)
+  const [saveLoading, setSaveLoading] = useState(false)
   const [editingEnabled, setEditingEnabled] = useState(false)
 
   const [ruleRow, setRuleRow] = useState<RuleTableRow | null>(null)
@@ -87,12 +93,16 @@ export function RulesDetailsPage() {
   useEffect(() => {
     if (!token || !id) return
     let cancelled = false
-    const overrides = loadRuleOverrides()
-    const currentCategories = loadRiskCategories()
-    Promise.all([getRisks(token), getRiskObjects(token, 1, 200), getUsersList(token)])
-      .then(([risks, riskObjectPage, usersRaw]) => {
+    Promise.all([
+      getRisks(token, user?.companyId),
+      getRiskObjects(token, 1, 200, user?.companyId),
+      getUsersList(token, user?.companyId),
+      getRiskCategories(token, user?.companyId),
+      getRuleOverrides(token, user?.companyId),
+    ])
+      .then(([risks, riskObjectPage, usersRaw, categoryItems, overrides]) => {
         if (cancelled) return
-        const rows = buildRuleRows(risks, overrides, currentCategories)
+        const rows = buildRuleRows(risks, overrides, categoryItems)
         const row = rows.find((item) => item.id === id)
         if (!row) {
           setError('Правило не найдено')
@@ -101,7 +111,7 @@ export function RulesDetailsPage() {
         const persisted = overrides[id] as RuleOverrides | undefined
         setRuleRow(row)
         setRiskObjects(riskObjectPage.items)
-        setCategories(currentCategories)
+        setCategories(categoryItems)
         setUsers(normalizeUsers(usersRaw))
         setDraft({
           riskObjectId: persisted?.riskObjectId ?? row.riskObjectId,
@@ -126,7 +136,7 @@ export function RulesDetailsPage() {
     return () => {
       cancelled = true
     }
-  }, [token, id])
+  }, [token, id, user?.companyId])
 
   const selectedResponsible =
     draft && draft.responsibleUserId
@@ -144,7 +154,7 @@ export function RulesDetailsPage() {
     setRiskObjectPreviewError(null)
     setRiskObjectPreview(null)
     try {
-      const details = await getRiskObjectById(token, draft.riskObjectId)
+      const details = await getRiskObjectById(token, draft.riskObjectId, user?.companyId)
       setRiskObjectPreview(details)
     } catch (e: unknown) {
       setRiskObjectPreviewError(
@@ -164,12 +174,20 @@ export function RulesDetailsPage() {
     }
   }, [riskObjectPreview])
 
-  function handleSave() {
+  async function handleSave() {
     if (!canManageRulesAndRisks) return
+    if (!token) return
     if (!id || !draft) return
-    saveRuleOverride(id, draft)
-    setSaveInfo('Правило сохранено')
-    setEditingEnabled(false)
+    setSaveLoading(true)
+    try {
+      await putRuleOverrideById(token, id, draft, user?.companyId)
+      setSaveInfo('Правило сохранено')
+      setEditingEnabled(false)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Не удалось сохранить правило')
+    } finally {
+      setSaveLoading(false)
+    }
   }
 
   if (loading) {
@@ -218,7 +236,7 @@ export function RulesDetailsPage() {
           >
             Категории риска
           </Button>
-          <Button variant="contained" onClick={handleSave} disabled={!canEdit}>
+          <Button variant="contained" onClick={() => void handleSave()} disabled={!canEdit || saveLoading}>
             Сохранить
           </Button>
         </Stack>

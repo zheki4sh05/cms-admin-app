@@ -39,15 +39,14 @@ import {
 import { alpha, useTheme } from '@mui/material/styles'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getRiskObjects, getRisks, getRulesChangeHistory } from '../api/client'
-import { useAuth } from '../auth/AuthContext'
-import type { RiskObject } from '../types/riskObjects'
-import type { RiskItem, RuleChangeHistoryEntry } from '../types/risks'
 import {
-  buildRuleRows,
-  loadRiskCategories,
-  loadRuleOverrides,
-  type RiskCategoryOption,
+  getRiskObjectModels,
+  getRulesList,
+  getRulesChangeHistory,
+} from '../api/client'
+import { useAuth } from '../auth/AuthContext'
+import type { RuleChangeHistoryEntry } from '../types/risks'
+import {
   type RuleTableRow,
   type RulePriority,
   priorityLabels,
@@ -74,14 +73,12 @@ function formatDateTime(iso: string) {
 export function RulesPage() {
   const theme = useTheme()
   const navigate = useNavigate()
-  const { token, hasPermission } = useAuth()
+  const { token, user, hasPermission } = useAuth()
   const canManageRulesAndRisks = hasPermission('manage_rules_and_risks')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [risks, setRisks] = useState<RiskItem[]>([])
-  const [riskObjects, setRiskObjects] = useState<RiskObject[]>([])
-  const [categories] = useState<RiskCategoryOption[]>(() => loadRiskCategories())
-  const [ruleOverrides] = useState(() => loadRuleOverrides())
+  const [tableRows, setTableRows] = useState<RuleTableRow[]>([])
+  const [riskObjectNamesById, setRiskObjectNamesById] = useState<Map<string, string>>(new Map())
   const [prioritySwitcher, setPrioritySwitcher] = useState<PrioritySwitcherValue>('all')
   const [ruleNameFilter, setRuleNameFilter] = useState('')
   const [priorityFilter, setPriorityFilter] = useState<PrioritySwitcherValue>('all')
@@ -115,12 +112,12 @@ export function RulesPage() {
   useEffect(() => {
     if (!token) return
     let cancelled = false
-    Promise.all([getRisks(token), getRiskObjects(token, 1, 500)])
-      .then(([riskItems, riskObjectPage]) => {
+    Promise.all([getRulesList(token, user?.companyId), getRiskObjectModels(token)])
+      .then(([items, riskObjectModels]) => {
         if (cancelled) return
         setError(null)
-        setRisks(riskItems)
-        setRiskObjects(riskObjectPage.items)
+        setTableRows(items)
+        setRiskObjectNamesById(new Map(riskObjectModels.map((item) => [item.id, item.name])))
       })
       .catch((e: unknown) => {
         if (cancelled) return
@@ -132,7 +129,7 @@ export function RulesPage() {
     return () => {
       cancelled = true
     }
-  }, [token])
+  }, [token, user?.companyId])
 
   const fetchHistoryPage = useCallback(
     async (page: number, append: boolean) => {
@@ -142,9 +139,15 @@ export function RulesPage() {
       else setHistoryInitialLoading(true)
       setHistoryError(null)
       try {
-        const { items, hasMore } = await getRulesChangeHistory(token, page, 5, {
-          q: historySearchDebounced || undefined,
-        })
+        const { items, hasMore } = await getRulesChangeHistory(
+          token,
+          page,
+          5,
+          {
+            q: historySearchDebounced || undefined,
+          },
+          user?.companyId,
+        )
         setHistoryItems((prev) => (append ? [...prev, ...items] : items))
         setHistoryHasMore(hasMore)
         historyLastPageRef.current = page
@@ -156,7 +159,7 @@ export function RulesPage() {
         setHistoryInitialLoading(false)
       }
     },
-    [token, historySearchDebounced],
+    [token, historySearchDebounced, user?.companyId],
   )
 
   useEffect(() => {
@@ -193,15 +196,28 @@ export function RulesPage() {
     fetchHistoryPage,
   ])
 
-  const tableRows = useMemo(() => {
-    return buildRuleRows(risks, ruleOverrides, categories)
-  }, [risks, ruleOverrides, categories])
+  const categoryOptions = useMemo(
+    () =>
+      Array.from(new Map(tableRows.map((row) => [row.categoryId, row.categoryLabel])).entries()).map(
+        ([id, name]) => ({ id, name }),
+      ),
+    [tableRows],
+  )
 
-  const riskObjectNameById = useMemo(() => {
-    return new Map<string, string>(
-      riskObjects.map((item) => [item.id, `${item.code} - ${item.name}`]),
-    )
-  }, [riskObjects])
+  const riskObjectOptions = useMemo(
+    () =>
+      Array.from(
+        new Map(
+          tableRows
+            .filter((row) => row.riskObjectId)
+            .map((row) => [
+              row.riskObjectId,
+              riskObjectNamesById.get(row.riskObjectId) ?? row.riskObjectId,
+            ]),
+        ).entries(),
+      ).map(([id, label]) => ({ id, label })),
+    [tableRows, riskObjectNamesById],
+  )
 
   const filteredRows = useMemo(() => {
     const normalizedName = ruleNameFilter.trim().toLowerCase()
@@ -349,7 +365,7 @@ export function RulesPage() {
                         <TableCell>{row.action}</TableCell>
                         <TableCell>{row.categoryLabel}</TableCell>
                         <TableCell>
-                          {riskObjectNameById.get(row.riskObjectId) ?? row.riskObjectId ?? 'Не привязан'}
+                          {riskObjectNamesById.get(row.riskObjectId) ?? row.riskObjectId ?? 'Не привязан'}
                         </TableCell>
                         <TableCell align="right">
                           <Button
@@ -599,7 +615,7 @@ export function RulesPage() {
                     }}
                   >
                     <MenuItem value="all">Все категории</MenuItem>
-                    {categories.map((category) => (
+                    {categoryOptions.map((category) => (
                       <MenuItem key={category.id} value={category.id}>
                         {category.name}
                       </MenuItem>
@@ -618,9 +634,9 @@ export function RulesPage() {
                     }}
                   >
                     <MenuItem value="all">Все рисковые объекты</MenuItem>
-                    {riskObjects.map((riskObject) => (
+                    {riskObjectOptions.map((riskObject) => (
                       <MenuItem key={riskObject.id} value={riskObject.id}>
-                        {riskObject.code} - {riskObject.name}
+                        {riskObject.label}
                       </MenuItem>
                     ))}
                   </Select>

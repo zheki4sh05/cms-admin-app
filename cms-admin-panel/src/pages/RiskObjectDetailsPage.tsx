@@ -36,11 +36,13 @@ import {
   Typography,
 } from '@mui/material'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { SyntheticEvent } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
+  getRiskCategories,
   getRisks,
+  getRuleOverrides,
   getRiskObjectById,
+  putRuleOverrideById,
   putRiskObjectById,
   putRiskObjectStatusById,
 } from '../api/client'
@@ -52,14 +54,10 @@ import type {
 } from '../types/riskObjects'
 import {
   buildRuleRows,
-  loadRiskCategories,
-  loadRuleOverrides,
   priorityLabels,
-  replaceRuleOverrides,
-  saveRuleOverride,
   type RiskCategoryOption,
-  type RuleOverridesMap,
   type RuleTableRow,
+  type RuleOverridesMap,
 } from './rulesShared'
 
 function newId() {
@@ -205,11 +203,8 @@ export function RiskObjectDetailsPage() {
   const [risks, setRisks] = useState<RiskItem[]>([])
   const [risksLoading, setRisksLoading] = useState(true)
   const [risksError, setRisksError] = useState<string | null>(null)
-  const [riskCategories] = useState<RiskCategoryOption[]>(() => loadRiskCategories())
-  const [ruleOverrides, setRuleOverrides] = useState<RuleOverridesMap>(() => loadRuleOverrides())
-  const [initialRuleOverrides, setInitialRuleOverrides] = useState<RuleOverridesMap>(() =>
-    loadRuleOverrides(),
-  )
+  const [riskCategories, setRiskCategories] = useState<RiskCategoryOption[]>([])
+  const [ruleOverrides, setRuleOverrides] = useState<RuleOverridesMap>({})
   const [riskToLinkId, setRiskToLinkId] = useState('')
 
   type OperationToast = { severity: 'success' | 'error'; text: string }
@@ -221,12 +216,9 @@ export function RiskObjectDetailsPage() {
     setToastOpen(true)
   }, [])
 
-  const handleToastClose = useCallback(
-    (_: SyntheticEvent | Event, _reason?: 'timeout' | 'clickaway' | 'escapeKeyDown') => {
-      setToastOpen(false)
-    },
-    [],
-  )
+  const handleToastClose = useCallback(() => {
+    setToastOpen(false)
+  }, [])
   const handleToastExited = useCallback(() => setToast(null), [])
 
   useEffect(() => {
@@ -268,14 +260,20 @@ export function RiskObjectDetailsPage() {
     let cancelled = false
     setRisksLoading(true)
     setRisksError(null)
-    getRisks(token)
-      .then((items) => {
+    Promise.all([
+      getRisks(token),
+      getRiskCategories(token),
+      getRuleOverrides(token),
+    ])
+      .then(([items, categoryItems, overrideItems]) => {
         if (cancelled) return
         setRisks(items)
+        setRiskCategories(categoryItems)
+        setRuleOverrides(overrideItems)
       })
       .catch((e: unknown) => {
         if (cancelled) return
-        setRisksError(e instanceof Error ? e.message : 'Не удалось загрузить список рисков')
+        setRisksError(e instanceof Error ? e.message : 'Не удалось загрузить данные рисков')
       })
       .finally(() => {
         if (!cancelled) setRisksLoading(false)
@@ -284,12 +282,6 @@ export function RiskObjectDetailsPage() {
       cancelled = true
     }
   }, [token])
-
-  useEffect(() => {
-    const overrides = loadRuleOverrides()
-    setRuleOverrides(overrides)
-    setInitialRuleOverrides(overrides)
-  }, [id])
 
   const previewJson = useMemo(() => {
     try {
@@ -311,45 +303,55 @@ export function RiskObjectDetailsPage() {
     return rows.filter((row) => row.riskObjectId !== id)
   }, [id, risks, ruleOverrides, riskCategories])
 
-  const updateRuleRiskLink = useCallback(
-    (ruleId: string, riskObjectId: string) => {
-      setRuleOverrides((prev) => {
-        const nextOverride = {
-          ...(prev[ruleId] ?? {}),
-          riskObjectId,
-        }
-        saveRuleOverride(ruleId, nextOverride)
-        return {
-          ...prev,
-          [ruleId]: nextOverride,
-        }
-      })
-    },
-    [],
-  )
-
-  const handleLinkRisk = useCallback(() => {
-    if (!id || !riskToLinkId) return
-    updateRuleRiskLink(riskToLinkId, id)
-    const linkedRule = availableRules.find((row) => row.id === riskToLinkId)
-    showToast({
-      severity: 'success',
-      text: linkedRule
-        ? `Риск «${linkedRule.name}» привязан к объекту`
-        : 'Риск привязан к объекту',
-    })
-    setRiskToLinkId('')
-  }, [id, riskToLinkId, updateRuleRiskLink, availableRules, showToast])
-
-  const handleUnlinkRisk = useCallback(
-    (rule: RuleTableRow) => {
-      updateRuleRiskLink(rule.id, '')
+  const handleLinkRisk = useCallback(async () => {
+    if (!token || !id || !riskToLinkId) return
+    const previous = ruleOverrides[riskToLinkId] ?? {}
+    const nextOverride = {
+      ...previous,
+      riskObjectId: id,
+    }
+    try {
+      await putRuleOverrideById(token, riskToLinkId, nextOverride)
+      setRuleOverrides((prev) => ({ ...prev, [riskToLinkId]: nextOverride }))
+      const linkedRule = availableRules.find((row) => row.id === riskToLinkId)
       showToast({
         severity: 'success',
-        text: `Связь с риском «${rule.name}» удалена`,
+        text: linkedRule
+          ? `Риск «${linkedRule.name}» привязан к объекту`
+          : 'Риск привязан к объекту',
       })
+      setRiskToLinkId('')
+    } catch (e: unknown) {
+      showToast({
+        severity: 'error',
+        text: e instanceof Error ? e.message : 'Не удалось привязать риск',
+      })
+    }
+  }, [token, id, riskToLinkId, ruleOverrides, availableRules, showToast])
+
+  const handleUnlinkRisk = useCallback(
+    async (rule: RuleTableRow) => {
+      if (!token) return
+      const previous = ruleOverrides[rule.id] ?? {}
+      const nextOverride = {
+        ...previous,
+        riskObjectId: '',
+      }
+      try {
+        await putRuleOverrideById(token, rule.id, nextOverride)
+        setRuleOverrides((prev) => ({ ...prev, [rule.id]: nextOverride }))
+        showToast({
+          severity: 'success',
+          text: `Связь с риском «${rule.name}» удалена`,
+        })
+      } catch (e: unknown) {
+        showToast({
+          severity: 'error',
+          text: e instanceof Error ? e.message : 'Не удалось отвязать риск',
+        })
+      }
     },
-    [updateRuleRiskLink, showToast],
+    [token, ruleOverrides, showToast],
   )
 
   const setFromSnapshot = useCallback((snapshot: RiskEditorSnapshot) => {
@@ -372,12 +374,10 @@ export function RiskObjectDetailsPage() {
   const handleReset = useCallback(() => {
     if (!initialSnapshot) return
     setFromSnapshot(initialSnapshot)
-    setRuleOverrides(initialRuleOverrides)
-    replaceRuleOverrides(initialRuleOverrides)
     setRiskToLinkId('')
     setEditingEnabled(false)
     showToast({ severity: 'success', text: 'Изменения сброшены.' })
-  }, [initialSnapshot, setFromSnapshot, initialRuleOverrides, showToast])
+  }, [initialSnapshot, setFromSnapshot, showToast])
 
   const handleSave = useCallback(async () => {
     if (isReadOnlyView || !canManageRiskObjects) return
