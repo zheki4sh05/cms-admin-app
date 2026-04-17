@@ -89,7 +89,11 @@ export function RulesDetailsPage() {
     let cancelled = false
     const overrides = loadRuleOverrides()
     const currentCategories = loadRiskCategories()
-    Promise.all([getRisks(token), getRiskObjects(token, 1, 200), getUsersList(token, user?.companyId)])
+    Promise.all([
+      getRisks(token, user?.companyId),
+      getRiskObjects(token, 1, 200, user?.companyId),
+      getUsersList(token, user?.companyId),
+    ])
       .then(([risks, riskObjectPage, usersRaw]) => {
         if (cancelled) return
         const rows = buildRuleRows(risks, overrides, currentCategories)
@@ -144,7 +148,7 @@ export function RulesDetailsPage() {
     setRiskObjectPreviewError(null)
     setRiskObjectPreview(null)
     try {
-      const details = await getRiskObjectById(token, draft.riskObjectId)
+      const details = await getRiskObjectById(token, draft.riskObjectId, user?.companyId)
       setRiskObjectPreview(details)
     } catch (e: unknown) {
       setRiskObjectPreviewError(

@@ -21,7 +21,7 @@ import {
 } from '@mui/material'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getRiskObjects, getUsersList, postRiskCreate } from '../api/client'
+import { getRiskObjects, getUsersList, postRuleCreate } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import type { RiskObject } from '../types/riskObjects'
 import type { RiskCategory } from '../types/risks'
@@ -29,7 +29,6 @@ import {
   actionLabels,
   loadRiskCategories,
   priorityLabels,
-  saveRuleOverride,
   type RiskCategoryOption,
   type RuleAction,
   type RuleEditorDraft,
@@ -93,7 +92,7 @@ export function RulesCreatePage() {
     let cancelled = false
     setLoadingRiskObjects(true)
     setError(null)
-    getRiskObjects(token, 1, 500)
+    getRiskObjects(token, 1, 500, user?.companyId)
       .then((res) => {
         if (cancelled) return
         setRiskObjects(res.items)
@@ -111,7 +110,7 @@ export function RulesCreatePage() {
     return () => {
       cancelled = true
     }
-  }, [token])
+  }, [token, user?.companyId])
 
   useEffect(() => {
     if (!token) return
@@ -149,30 +148,26 @@ export function RulesCreatePage() {
       setError('Заполните название и описание')
       return
     }
-    const apiCategory: RiskCategory =
-      categoryId === 'financial' || categoryId === 'reputational' || categoryId === 'operational'
-        ? categoryId
-        : 'operational'
     setSaving(true)
     setError(null)
     setSuccess(null)
     try {
-      const result = await postRiskCreate(token, {
+      const result = await postRuleCreate(
+        token,
+        {
         name: name.trim(),
-        description: description.trim(),
-        category: apiCategory,
-        riskObjectId: riskObjectId || undefined,
-      })
-      saveRuleOverride(result.id, {
-        riskObjectId,
-        mechanismScriptName,
-        mechanismScriptContent,
+        condition: description.trim(),
         categoryId,
+        riskObjectId: riskObjectId || undefined,
         priority,
-        responsibleUserId,
+        responsibleUserId: responsibleUserId || undefined,
         actions,
         enabled: riskObjectId ? enabled : false,
-      })
+        mechanismScriptName,
+        mechanismScriptContent,
+        },
+        user?.companyId,
+      )
       setSuccess('Правило риска создано')
       navigate(`/app/rules/${result.id}`)
     } catch (e: unknown) {
@@ -192,6 +187,7 @@ export function RulesCreatePage() {
     responsibleUserId,
     actions,
     enabled,
+    user?.companyId,
     canManageRulesAndRisks,
     navigate,
   ])

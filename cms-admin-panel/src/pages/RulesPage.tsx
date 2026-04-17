@@ -74,7 +74,7 @@ function formatDateTime(iso: string) {
 export function RulesPage() {
   const theme = useTheme()
   const navigate = useNavigate()
-  const { token, hasPermission } = useAuth()
+  const { token, user, hasPermission } = useAuth()
   const canManageRulesAndRisks = hasPermission('manage_rules_and_risks')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -115,7 +115,7 @@ export function RulesPage() {
   useEffect(() => {
     if (!token) return
     let cancelled = false
-    Promise.all([getRisks(token), getRiskObjects(token, 1, 500)])
+    Promise.all([getRisks(token, user?.companyId), getRiskObjects(token, 1, 500, user?.companyId)])
       .then(([riskItems, riskObjectPage]) => {
         if (cancelled) return
         setError(null)
@@ -132,7 +132,7 @@ export function RulesPage() {
     return () => {
       cancelled = true
     }
-  }, [token])
+  }, [token, user?.companyId])
 
   const fetchHistoryPage = useCallback(
     async (page: number, append: boolean) => {
@@ -142,9 +142,15 @@ export function RulesPage() {
       else setHistoryInitialLoading(true)
       setHistoryError(null)
       try {
-        const { items, hasMore } = await getRulesChangeHistory(token, page, 5, {
-          q: historySearchDebounced || undefined,
-        })
+        const { items, hasMore } = await getRulesChangeHistory(
+          token,
+          page,
+          5,
+          {
+            q: historySearchDebounced || undefined,
+          },
+          user?.companyId,
+        )
         setHistoryItems((prev) => (append ? [...prev, ...items] : items))
         setHistoryHasMore(hasMore)
         historyLastPageRef.current = page
@@ -156,7 +162,7 @@ export function RulesPage() {
         setHistoryInitialLoading(false)
       }
     },
-    [token, historySearchDebounced],
+    [token, historySearchDebounced, user?.companyId],
   )
 
   useEffect(() => {

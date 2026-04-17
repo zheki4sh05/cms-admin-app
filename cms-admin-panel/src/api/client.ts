@@ -25,6 +25,8 @@ import type {
   RiskCreatePayload,
   RiskCreateResponse,
   RiskItem,
+  RuleCreatePayload,
+  RuleCreateResponse,
   RuleChangeHistoryPage,
 } from '../types/risks'
 import type { AccessPermission } from '../types/permissions'
@@ -207,25 +209,21 @@ export async function getCompanyByEmployeeId(
   }
 }
 
-export async function getMyPermissions(token: string): Promise<AccessPermission[]> {
+export async function getMyPermissions(
+  token: string,
+  companyId?: string | null,
+): Promise<AccessPermission[]> {
   const res = await fetch(apiUrl('me/permissions'), {
-    headers: authHeaders(token),
+    headers: authHeaders(token, companyId),
   })
   const data = (await res.json().catch(() => ({}))) as {
     message?: string
-    id?: string
-    name?: string
+    items?: AccessPermission[]
   }
   if (!res.ok) {
-    throw new Error(data.message ?? 'Ошибка загрузки компании')
+    throw new Error(data.message ?? 'Ошибка загрузки прав доступа')
   }
-  if (!data.id || !data.name) {
-    throw new Error('Некорректный ответ сервера')
-  }
-  return {
-    id: data.id,
-    name: data.name,
-  }
+  return data.items ?? []
 }
 
 
@@ -558,13 +556,14 @@ export async function getRiskObjects(
   token: string,
   page: number,
   pageSize: number,
+  companyId?: string | null,
 ): Promise<RiskObjectListPage> {
   const params = new URLSearchParams({
     page: String(page),
     pageSize: String(pageSize),
   })
   const res = await fetch(`${apiUrl('risk-objects')}?${params.toString()}`, {
-    headers: authHeaders(token),
+    headers: authHeaders(token, companyId),
   })
   const data = (await res.json().catch(() => ({}))) as {
     message?: string
@@ -580,9 +579,9 @@ export async function getRiskObjects(
   }
 }
 
-export async function getRisks(token: string): Promise<RiskItem[]> {
+export async function getRisks(token: string, companyId?: string | null): Promise<RiskItem[]> {
   const res = await fetch(apiUrl('risks'), {
-    headers: authHeaders(token),
+    headers: authHeaders(token, companyId),
   })
   const data = (await res.json().catch(() => ({}))) as {
     message?: string
@@ -617,11 +616,36 @@ export async function postRiskCreate(
   return { id: data.id, savedAt: data.savedAt }
 }
 
+export async function postRuleCreate(
+  token: string,
+  payload: RuleCreatePayload,
+  companyId?: string | null,
+): Promise<RuleCreateResponse> {
+  const res = await fetch(apiUrl('rules'), {
+    method: 'POST',
+    headers: authHeaders(token, companyId),
+    body: JSON.stringify(payload),
+  })
+  const data = (await res.json().catch(() => ({}))) as {
+    message?: string
+    id?: string
+    savedAt?: string
+  }
+  if (!res.ok) {
+    throw new Error(data.message ?? 'Не удалось создать правило')
+  }
+  if (!data.id || !data.savedAt) {
+    throw new Error('Некорректный ответ сервера')
+  }
+  return { id: data.id, savedAt: data.savedAt }
+}
+
 export async function getRulesChangeHistory(
   token: string,
   page: number,
   pageSize: number,
   options?: IntegrationChangeHistoryQuery,
+  companyId?: string | null,
 ): Promise<RuleChangeHistoryPage> {
   const params = new URLSearchParams({
     page: String(page),
@@ -635,7 +659,7 @@ export async function getRulesChangeHistory(
     }
   }
   const res = await fetch(`${apiUrl('rules/change-history')}?${params.toString()}`, {
-    headers: authHeaders(token),
+    headers: authHeaders(token, companyId),
   })
   const data = (await res.json().catch(() => ({}))) as {
     message?: string
@@ -687,9 +711,10 @@ export async function getRiskObjectModelById(token: string, id: string): Promise
 export async function getRiskObjectById(
   token: string,
   id: string,
+  companyId?: string | null,
 ): Promise<RiskObjectDetails> {
   const res = await fetch(apiUrl(`risk-objects/${id}`), {
-    headers: authHeaders(token),
+    headers: authHeaders(token, companyId),
   })
   const data = (await res.json().catch(() => ({}))) as {
     message?: string
