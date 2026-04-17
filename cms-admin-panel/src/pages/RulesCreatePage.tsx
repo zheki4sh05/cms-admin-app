@@ -21,24 +21,16 @@ import {
 } from '@mui/material'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getRiskObjects, getUsersList, postRuleCreate } from '../api/client'
+import { getRiskCategories, getRiskObjects, getUsersList, postRuleCreate } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import type { RiskObject } from '../types/riskObjects'
-import type { RiskCategory } from '../types/risks'
 import {
   actionLabels,
-  loadRiskCategories,
   priorityLabels,
   type RiskCategoryOption,
   type RuleAction,
   type RuleEditorDraft,
 } from './rulesShared'
-
-const categoryLabels: Record<RiskCategory, string> = {
-  financial: 'Финансовый',
-  reputational: 'Репутационный',
-  operational: 'Операционный',
-}
 
 type UserOption = {
   id: string
@@ -68,8 +60,8 @@ export function RulesCreatePage() {
 
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
-  const [categories] = useState<RiskCategoryOption[]>(() => loadRiskCategories())
-  const [categoryId, setCategoryId] = useState('operational')
+  const [categories, setCategories] = useState<RiskCategoryOption[]>([])
+  const [categoryId, setCategoryId] = useState('')
   const [riskObjectId, setRiskObjectId] = useState('')
   const [riskObjects, setRiskObjects] = useState<RiskObject[]>([])
   const [mechanismScriptName, setMechanismScriptName] = useState('')
@@ -83,9 +75,32 @@ export function RulesCreatePage() {
 
   const [loadingRiskObjects, setLoadingRiskObjects] = useState(true)
   const [loadingUsers, setLoadingUsers] = useState(true)
+  const [loadingCategories, setLoadingCategories] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!token) return
+    let cancelled = false
+    setLoadingCategories(true)
+    getRiskCategories(token, user?.companyId)
+      .then((items) => {
+        if (cancelled) return
+        setCategories(items)
+        setCategoryId((prev) => prev || items[0]?.id || '')
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return
+        setError(e instanceof Error ? e.message : 'Не удалось загрузить категории риска')
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingCategories(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [token, user?.companyId])
 
   useEffect(() => {
     if (!token) return
@@ -146,6 +161,10 @@ export function RulesCreatePage() {
     }
     if (!name.trim() || !description.trim()) {
       setError('Заполните название и описание')
+      return
+    }
+    if (!categoryId) {
+      setError('Выберите категорию риска')
       return
     }
     setSaving(true)
@@ -215,7 +234,9 @@ export function RulesCreatePage() {
           variant="contained"
           startIcon={<SaveOutlinedIcon />}
           onClick={() => void handleSave()}
-          disabled={saving || loadingRiskObjects || loadingUsers || !canManageRulesAndRisks}
+          disabled={
+            saving || loadingRiskObjects || loadingUsers || loadingCategories || !canManageRulesAndRisks
+          }
         >
           Сохранить
         </Button>
@@ -262,11 +283,11 @@ export function RulesCreatePage() {
               label="Категория риска"
               value={categoryId}
               onChange={(e) => setCategoryId(e.target.value)}
-              disabled={!canManageRulesAndRisks}
+              disabled={!canManageRulesAndRisks || loadingCategories}
             >
               {categories.map((category) => (
                 <MenuItem key={category.id} value={category.id}>
-                  {categoryLabels[category.id as RiskCategory] ?? category.name}
+                  {category.name}
                 </MenuItem>
               ))}
             </Select>

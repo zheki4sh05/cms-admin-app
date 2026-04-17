@@ -250,6 +250,39 @@ export type IntegrationChangeHistoryQuery = {
   filters?: Record<string, string>
 }
 
+export type RiskCategoryDto = {
+  id: string
+  name: string
+}
+
+export type RulePriorityDto = 'low' | 'medium' | 'high'
+export type RuleActionDto = 'createIncident' | 'sendNotification'
+
+export type RuleOverrideDto = {
+  riskObjectId?: string
+  mechanismScriptName?: string
+  mechanismScriptContent?: string
+  categoryId?: string
+  priority?: RulePriorityDto
+  responsibleUserId?: string
+  actions?: RuleActionDto[]
+  enabled?: boolean
+}
+
+export type RuleOverridesMapDto = Record<string, RuleOverrideDto>
+
+export type RuleListItemDto = {
+  id: string
+  name: string
+  condition: string
+  action: string
+  categoryId: string
+  categoryLabel: string
+  priority: RulePriorityDto
+  enabled: boolean
+  riskObjectId: string
+}
+
 export async function getIntegrationChangeHistory(
   token: string,
   page: number,
@@ -591,6 +624,163 @@ export async function getRisks(token: string, companyId?: string | null): Promis
     throw new Error(data.message ?? 'Не удалось загрузить риски')
   }
   return data.items ?? []
+}
+
+export async function getRulesList(
+  token: string,
+  companyId?: string | null,
+): Promise<RuleListItemDto[]> {
+  const res = await fetch(apiUrl('rules'), {
+    headers: authHeaders(token, companyId),
+  })
+  const data = (await res.json().catch(() => ({}))) as {
+    message?: string
+    items?: RuleListItemDto[]
+  }
+  if (!res.ok) {
+    throw new Error(data.message ?? 'Не удалось загрузить правила')
+  }
+  return (data.items ?? []).filter(
+    (item): item is RuleListItemDto =>
+      Boolean(
+        item &&
+          typeof item.id === 'string' &&
+          typeof item.name === 'string' &&
+          typeof item.condition === 'string' &&
+          typeof item.action === 'string' &&
+          typeof item.categoryId === 'string' &&
+          typeof item.categoryLabel === 'string' &&
+          (item.priority === 'low' || item.priority === 'medium' || item.priority === 'high') &&
+          typeof item.enabled === 'boolean' &&
+          typeof item.riskObjectId === 'string',
+      ),
+  )
+}
+
+export async function getRiskCategories(
+  token: string,
+  companyId?: string | null,
+): Promise<RiskCategoryDto[]> {
+  const res = await fetch(apiUrl('risk-categories'), {
+    headers: authHeaders(token, companyId),
+  })
+  const data = (await res.json().catch(() => ({}))) as {
+    message?: string
+    items?: RiskCategoryDto[]
+  }
+  if (!res.ok) {
+    throw new Error(data.message ?? 'Не удалось загрузить категории риска')
+  }
+  return (data.items ?? []).filter(
+    (item): item is RiskCategoryDto =>
+      Boolean(item && typeof item.id === 'string' && typeof item.name === 'string'),
+  )
+}
+
+export async function postRiskCategoryCreate(
+  token: string,
+  payload: { name: string },
+  companyId?: string | null,
+): Promise<RiskCategoryDto> {
+  const res = await fetch(apiUrl('risk-categories'), {
+    method: 'POST',
+    headers: authHeaders(token, companyId),
+    body: JSON.stringify(payload),
+  })
+  const data = (await res.json().catch(() => ({}))) as {
+    message?: string
+    id?: string
+    name?: string
+  }
+  if (!res.ok) {
+    throw new Error(data.message ?? 'Не удалось создать категорию риска')
+  }
+  if (!data.id || !data.name) {
+    throw new Error('Некорректный ответ сервера')
+  }
+  return { id: data.id, name: data.name }
+}
+
+export async function putRiskCategoryById(
+  token: string,
+  id: string,
+  payload: { name: string },
+  companyId?: string | null,
+): Promise<RiskCategoryDto> {
+  const res = await fetch(apiUrl(`risk-categories/${id}`), {
+    method: 'PUT',
+    headers: authHeaders(token, companyId),
+    body: JSON.stringify(payload),
+  })
+  const data = (await res.json().catch(() => ({}))) as {
+    message?: string
+    id?: string
+    name?: string
+  }
+  if (!res.ok) {
+    throw new Error(data.message ?? 'Не удалось обновить категорию риска')
+  }
+  if (!data.id || !data.name) {
+    throw new Error('Некорректный ответ сервера')
+  }
+  return { id: data.id, name: data.name }
+}
+
+export async function deleteRiskCategoryById(
+  token: string,
+  id: string,
+  companyId?: string | null,
+): Promise<void> {
+  const res = await fetch(apiUrl(`risk-categories/${id}`), {
+    method: 'DELETE',
+    headers: authHeaders(token, companyId),
+  })
+  if (res.status === 204) return
+  const data = (await res.json().catch(() => ({}))) as { message?: string }
+  if (!res.ok) {
+    throw new Error(data.message ?? 'Не удалось удалить категорию риска')
+  }
+}
+
+export async function getRuleOverrides(
+  token: string,
+  companyId?: string | null,
+): Promise<RuleOverridesMapDto> {
+  const res = await fetch(apiUrl('rules/overrides'), {
+    headers: authHeaders(token, companyId),
+  })
+  const data = (await res.json().catch(() => ({}))) as {
+    message?: string
+    items?: RuleOverridesMapDto
+  }
+  if (!res.ok) {
+    throw new Error(data.message ?? 'Не удалось загрузить настройки правил')
+  }
+  if (!data.items || typeof data.items !== 'object' || Array.isArray(data.items)) {
+    return {}
+  }
+  return data.items
+}
+
+export async function putRuleOverrideById(
+  token: string,
+  ruleId: string,
+  payload: RuleOverrideDto,
+  companyId?: string | null,
+): Promise<RuleOverrideDto> {
+  const res = await fetch(apiUrl(`rules/overrides/${ruleId}`), {
+    method: 'PUT',
+    headers: authHeaders(token, companyId),
+    body: JSON.stringify(payload),
+  })
+  const data = (await res.json().catch(() => ({}))) as {
+    message?: string
+    item?: RuleOverrideDto
+  }
+  if (!res.ok) {
+    throw new Error(data.message ?? 'Не удалось сохранить настройки правила')
+  }
+  return data.item ?? {}
 }
 
 export async function postRiskCreate(

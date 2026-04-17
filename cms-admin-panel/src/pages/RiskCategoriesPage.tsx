@@ -27,24 +27,24 @@ import {
   Typography,
 } from '@mui/material'
 import { useCallback, useMemo, useState } from 'react'
-import type { SyntheticEvent } from 'react'
+import { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useAuth } from '../auth/AuthContext'
 import {
-  loadRiskCategories,
-  saveRiskCategories,
-  type RiskCategoryOption,
-} from './rulesShared'
-
-function createCategoryId() {
-  return globalThis.crypto?.randomUUID?.() ?? `cat-${Date.now()}-${Math.random().toString(16).slice(2)}`
-}
+  deleteRiskCategoryById,
+  getRiskCategories,
+  postRiskCategoryCreate,
+  putRiskCategoryById,
+} from '../api/client'
+import { useAuth } from '../auth/AuthContext'
+import { type RiskCategoryOption } from './rulesShared'
 
 export function RiskCategoriesPage() {
   const navigate = useNavigate()
-  const { hasPermission } = useAuth()
+  const { token, user, hasPermission } = useAuth()
   const canManageRulesAndRisks = hasPermission('manage_rules_and_risks')
-  const [categories, setCategories] = useState<RiskCategoryOption[]>(() => loadRiskCategories())
+  const [categories, setCategories] = useState<RiskCategoryOption[]>([])
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
   const [newCategoryName, setNewCategoryName] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingName, setEditingName] = useState('')
@@ -58,14 +58,35 @@ export function RiskCategoriesPage() {
     setToastOpen(true)
   }, [])
 
-  const handleToastClose = useCallback(
-    (_: SyntheticEvent | Event, _reason?: 'timeout' | 'clickaway' | 'escapeKeyDown') => {
-      setToastOpen(false)
-    },
-    [],
-  )
+  const handleToastClose = useCallback(() => {
+    setToastOpen(false)
+  }, [])
 
   const handleToastExited = useCallback(() => setToast(null), [])
+
+  useEffect(() => {
+    if (!token) return
+    let cancelled = false
+    setLoading(true)
+    getRiskCategories(token, user?.companyId)
+      .then((items) => {
+        if (cancelled) return
+        setCategories(items)
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return
+        showToast({
+          severity: 'error',
+          text: e instanceof Error ? e.message : 'Не удалось загрузить категории',
+        })
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [token, user?.companyId, showToast])
 
   const duplicateName = useMemo(() => {
     const normalized = newCategoryName.trim().toLowerCase()
@@ -73,14 +94,9 @@ export function RiskCategoriesPage() {
     return categories.some((item) => item.name.trim().toLowerCase() === normalized)
   }, [categories, newCategoryName])
 
-  function persist(next: RiskCategoryOption[], message: string) {
-    setCategories(next)
-    saveRiskCategories(next)
-    showToast({ severity: 'success', text: message })
-  }
-
-  function handleAddCategory() {
+  async function handleAddCategory() {
     if (!canManageRulesAndRisks) return
+    if (!token) return
     const name = newCategoryName.trim()
     if (!name) {
       showToast({ severity: 'error', text: 'Введите название категории' })
@@ -90,11 +106,20 @@ export function RiskCategoriesPage() {
       showToast({ severity: 'error', text: 'Категория с таким названием уже существует' })
       return
     }
-    persist(
-      [...categories, { id: createCategoryId(), name, system: false }],
-      'Категория добавлена',
-    )
-    setNewCategoryName('')
+    setSaving(true)
+    try {
+      const created = await postRiskCategoryCreate(token, { name }, user?.companyId)
+      setCategories((prev) => [...prev, created])
+      setNewCategoryName('')
+      showToast({ severity: 'success', text: 'Категория добавлена' })
+    } catch (e: unknown) {
+      showToast({
+        severity: 'error',
+        text: e instanceof Error ? e.message : 'Не удалось добавить категорию',
+      })
+    } finally {
+      setSaving(false)
+    }
   }
 
   function startEdit(category: RiskCategoryOption) {
@@ -103,8 +128,9 @@ export function RiskCategoriesPage() {
     setEditingName(category.name)
   }
 
-  function saveEdit(categoryId: string) {
+  async function saveEdit(categoryId: string) {
     if (!canManageRulesAndRisks) return
+    if (!token) return
     const name = editingName.trim()
     if (!name) {
       showToast({ severity: 'error', text: 'Название категории не может быть пустым' })
@@ -117,21 +143,44 @@ export function RiskCategoriesPage() {
       showToast({ severity: 'error', text: 'Категория с таким названием уже существует' })
       return
     }
-    const next = categories.map((item) => (item.id === categoryId ? { ...item, name } : item))
-    persist(next, 'Категория обновлена')
-    setEditingId(null)
-    setEditingName('')
-  }
-
-  function confirmDelete() {
-    if (!canManageRulesAndRisks) return
-    if (!categoryToDelete) return
-    const next = categories.filter((item) => item.id !== categoryToDelete.id)
-    persist(next, 'Категория удалена')
-    setCategoryToDelete(null)
-    if (editingId === categoryToDelete.id) {
+    setSaving(true)
+    try {
+      const updated = await putRiskCategoryById(token, categoryId, { name }, user?.companyId)
+      setCategories((prev) => prev.map((item) => (item.id === categoryId ? updated : item)))
       setEditingId(null)
       setEditingName('')
+      showToast({ severity: 'success', text: 'Категория обновлена' })
+    } catch (e: unknown) {
+      showToast({
+        severity: 'error',
+        text: e instanceof Error ? e.message : 'Не удалось обновить категорию',
+      })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function confirmDelete() {
+    if (!canManageRulesAndRisks) return
+    if (!token) return
+    if (!categoryToDelete) return
+    setSaving(true)
+    try {
+      await deleteRiskCategoryById(token, categoryToDelete.id, user?.companyId)
+      setCategories((prev) => prev.filter((item) => item.id !== categoryToDelete.id))
+      setCategoryToDelete(null)
+      if (editingId === categoryToDelete.id) {
+        setEditingId(null)
+        setEditingName('')
+      }
+      showToast({ severity: 'success', text: 'Категория удалена' })
+    } catch (e: unknown) {
+      showToast({
+        severity: 'error',
+        text: e instanceof Error ? e.message : 'Не удалось удалить категорию',
+      })
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -165,7 +214,7 @@ export function RiskCategoriesPage() {
           <Button
             variant="contained"
             onClick={handleAddCategory}
-            disabled={!newCategoryName.trim() || !canManageRulesAndRisks}
+            disabled={!newCategoryName.trim() || !canManageRulesAndRisks || saving}
           >
             Добавить
           </Button>
@@ -183,7 +232,15 @@ export function RiskCategoriesPage() {
             </TableRow>
           </TableHead>
           <TableBody>
-            {categories.length === 0 ? (
+            {loading ? (
+              <TableRow>
+                <TableCell colSpan={2}>
+                  <Typography variant="body2" color="text.secondary">
+                    Загрузка категорий...
+                  </Typography>
+                </TableCell>
+              </TableRow>
+            ) : categories.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={2}>
                   <Typography variant="body2" color="text.secondary">
@@ -217,7 +274,7 @@ export function RiskCategoriesPage() {
                             color="primary"
                             onClick={() => saveEdit(category.id)}
                             aria-label="Сохранить"
-                            disabled={!canManageRulesAndRisks}
+                            disabled={!canManageRulesAndRisks || saving}
                           >
                             <SaveOutlinedIcon fontSize="small" />
                           </IconButton>
@@ -238,7 +295,7 @@ export function RiskCategoriesPage() {
                             color="primary"
                             onClick={() => startEdit(category)}
                             aria-label="Редактировать"
-                            disabled={!canManageRulesAndRisks}
+                            disabled={!canManageRulesAndRisks || saving}
                           >
                             <EditOutlinedIcon fontSize="small" />
                           </IconButton>
@@ -247,7 +304,7 @@ export function RiskCategoriesPage() {
                             color="error"
                             onClick={() => setCategoryToDelete(category)}
                             aria-label="Удалить"
-                            disabled={!canManageRulesAndRisks}
+                            disabled={!canManageRulesAndRisks || saving}
                           >
                             <DeleteOutlinedIcon fontSize="small" />
                           </IconButton>
@@ -279,7 +336,7 @@ export function RiskCategoriesPage() {
             color="error"
             variant="contained"
             onClick={confirmDelete}
-            disabled={!canManageRulesAndRisks}
+            disabled={!canManageRulesAndRisks || saving}
           >
             Удалить
           </Button>
