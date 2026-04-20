@@ -772,15 +772,6 @@ export const handlers = [
     return HttpResponse.json(currentAuthAccount.user)
   }),
 
-  http.get('/api/me/permissions', async ({ request }) => {
-    await delay(200)
-    const token = parseAuth(request)
-    if (token !== MOCK_TOKEN) {
-      return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
-    }
-    return HttpResponse.json({ items: currentAuthAccount.permissions })
-  }),
-
   http.get('/api/companies/by-employee/:employeeId', async ({ request, params }) => {
     await delay(220)
     const token = parseAuth(request)
@@ -819,6 +810,10 @@ export const handlers = [
     if (token !== MOCK_TOKEN) {
       return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
     }
+    const companyId = request.headers.get('CompanyId')?.trim()
+    if (!companyId) {
+      return HttpResponse.json({ message: 'Требуется заголовок CompanyId' }, { status: 400 })
+    }
     return HttpResponse.json({ items: mockUsers })
   }),
 
@@ -827,6 +822,10 @@ export const handlers = [
     const token = parseAuth(request)
     if (token !== MOCK_TOKEN) {
       return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
+    }
+    const companyId = request.headers.get('CompanyId')?.trim()
+    if (!companyId) {
+      return HttpResponse.json({ message: 'Требуется заголовок CompanyId' }, { status: 400 })
     }
     const id = String(params.id ?? '')
     const user = mockUsers.find((item) => item.id === id)
@@ -865,6 +864,10 @@ export const handlers = [
     const token = parseAuth(request)
     if (token !== MOCK_TOKEN) {
       return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
+    }
+    const companyId = request.headers.get('CompanyId')?.trim()
+    if (!companyId) {
+      return HttpResponse.json({ message: 'Требуется заголовок CompanyId' }, { status: 400 })
     }
     const id = String(params.id ?? '')
     const userIndex = mockUsers.findIndex((item) => item.id === id)

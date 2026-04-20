@@ -21,9 +21,14 @@ import {
 } from '@mui/material'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getRiskCategories, getRiskObjects, getUsersList, postRuleCreate } from '../api/client'
+import {
+  getRiskCategories,
+  getRuleRiskObjects,
+  getUsersList,
+  postRuleCreate,
+  type RuleRiskObjectOption,
+} from '../api/client'
 import { useAuth } from '../auth/AuthContext'
-import type { RiskObject } from '../types/riskObjects'
 import {
   actionLabels,
   priorityLabels,
@@ -63,7 +68,7 @@ export function RulesCreatePage() {
   const [categories, setCategories] = useState<RiskCategoryOption[]>([])
   const [categoryId, setCategoryId] = useState('')
   const [riskObjectId, setRiskObjectId] = useState('')
-  const [riskObjects, setRiskObjects] = useState<RiskObject[]>([])
+  const [riskObjects, setRiskObjects] = useState<RuleRiskObjectOption[]>([])
   const [mechanismScriptName, setMechanismScriptName] = useState('')
   const [mechanismScriptContent, setMechanismScriptContent] = useState('')
   const [priority, setPriority] = useState<RuleEditorDraft['priority']>('medium')
@@ -72,6 +77,7 @@ export function RulesCreatePage() {
   const [enabled, setEnabled] = useState(false)
   const [users, setUsers] = useState<UserOption[]>([])
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const [scriptFileLoading, setScriptFileLoading] = useState(false)
 
   const [loadingRiskObjects, setLoadingRiskObjects] = useState(true)
   const [loadingUsers, setLoadingUsers] = useState(true)
@@ -107,12 +113,12 @@ export function RulesCreatePage() {
     let cancelled = false
     setLoadingRiskObjects(true)
     setError(null)
-    getRiskObjects(token, 1, 500, user?.companyId)
-      .then((res) => {
+    getRuleRiskObjects(token, user?.companyId)
+      .then((items) => {
         if (cancelled) return
-        setRiskObjects(res.items)
-        if (res.items.length > 0) {
-          setRiskObjectId((prev) => prev || res.items[0].id)
+        setRiskObjects(items)
+        if (items.length > 0) {
+          setRiskObjectId((prev) => prev || items[0].uuid)
         }
       })
       .catch((e: unknown) => {
@@ -167,6 +173,10 @@ export function RulesCreatePage() {
       setError('Выберите категорию риска')
       return
     }
+    if (scriptFileLoading) {
+      setError('Дождитесь загрузки содержимого файла скрипта')
+      return
+    }
     setSaving(true)
     setError(null)
     setSuccess(null)
@@ -206,6 +216,7 @@ export function RulesCreatePage() {
     responsibleUserId,
     actions,
     enabled,
+    scriptFileLoading,
     user?.companyId,
     canManageRulesAndRisks,
     navigate,
@@ -235,7 +246,12 @@ export function RulesCreatePage() {
           startIcon={<SaveOutlinedIcon />}
           onClick={() => void handleSave()}
           disabled={
-            saving || loadingRiskObjects || loadingUsers || loadingCategories || !canManageRulesAndRisks
+            saving ||
+            scriptFileLoading ||
+            loadingRiskObjects ||
+            loadingUsers ||
+            loadingCategories ||
+            !canManageRulesAndRisks
           }
         >
           Сохранить
@@ -311,8 +327,8 @@ export function RulesCreatePage() {
                 <em>— не выбрано —</em>
               </MenuItem>
               {riskObjects.map((riskObject) => (
-                <MenuItem key={riskObject.id} value={riskObject.id}>
-                  {riskObject.code} - {riskObject.name}
+                <MenuItem key={riskObject.uuid} value={riskObject.uuid}>
+                  {riskObject.code ? `${riskObject.code} - ${riskObject.name}` : riskObject.name}
                 </MenuItem>
               ))}
             </Select>
@@ -337,10 +353,22 @@ export function RulesCreatePage() {
                 const file = event.target.files?.[0]
                 event.target.value = ''
                 if (!file) return
-                void file.text().then((content) => {
-                  setMechanismScriptName(file.name)
-                  setMechanismScriptContent(content)
-                })
+                setScriptFileLoading(true)
+                setError(null)
+                void file
+                  .text()
+                  .then((content) => {
+                    setMechanismScriptName(file.name)
+                    setMechanismScriptContent(content)
+                  })
+                  .catch(() => {
+                    setMechanismScriptName(file.name)
+                    setMechanismScriptContent('')
+                    setError('Не удалось прочитать файл скрипта')
+                  })
+                  .finally(() => {
+                    setScriptFileLoading(false)
+                  })
               }}
             />
             <TextField
@@ -350,6 +378,11 @@ export function RulesCreatePage() {
               fullWidth
               InputProps={{ readOnly: true }}
             />
+            {scriptFileLoading ? (
+              <Typography variant="caption" color="text.secondary">
+                Чтение файла скрипта...
+              </Typography>
+            ) : null}
           </Stack>
 
           <FormControl fullWidth>

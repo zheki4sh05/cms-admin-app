@@ -2,6 +2,7 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import ClearAllOutlinedIcon from '@mui/icons-material/ClearAllOutlined'
 import DeleteOutlinedIcon from '@mui/icons-material/DeleteOutlined'
 import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined'
+import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp'
 import SaveOutlinedIcon from '@mui/icons-material/SaveOutlined'
 import {
   Alert,
@@ -13,6 +14,7 @@ import {
   DialogContent,
   DialogContentText,
   DialogTitle,
+  Fab,
   FormControl,
   FormControlLabel,
   InputLabel,
@@ -175,6 +177,10 @@ function rootFieldsFromDefinition(definition: Record<string, unknown>): RootFiel
   return fields
 }
 
+function ToastSlideTransition(props: Omit<SlideProps, 'direction'>) {
+  return <Slide {...props} direction="up" />
+}
+
 export function RiskObjectDetailsPage() {
   const navigate = useNavigate()
   const { id = '' } = useParams()
@@ -210,6 +216,7 @@ export function RiskObjectDetailsPage() {
   type OperationToast = { severity: 'success' | 'error'; text: string }
   const [toast, setToast] = useState<OperationToast | null>(null)
   const [toastOpen, setToastOpen] = useState(false)
+  const [showScrollTopButton, setShowScrollTopButton] = useState(false)
 
   const showToast = useCallback((payload: OperationToast) => {
     setToast(payload)
@@ -220,6 +227,20 @@ export function RiskObjectDetailsPage() {
     setToastOpen(false)
   }, [])
   const handleToastExited = useCallback(() => setToast(null), [])
+  const handleScrollToTop = useCallback(() => {
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }, [])
+
+  useEffect(() => {
+    const updateScrollTopButtonVisibility = () => {
+      setShowScrollTopButton(window.scrollY > 320)
+    }
+    updateScrollTopButtonVisibility()
+    window.addEventListener('scroll', updateScrollTopButtonVisibility, { passive: true })
+    return () => {
+      window.removeEventListener('scroll', updateScrollTopButtonVisibility)
+    }
+  }, [])
 
   useEffect(() => {
     if (!token || !id) return
@@ -883,8 +904,7 @@ export function RiskObjectDetailsPage() {
             <Stack
               direction={{ xs: 'column', md: 'row' }}
               spacing={1}
-              sx={{ mb: 1.5 }}
-              alignItems={{ md: 'center' }}
+              sx={{ mb: 1.5, alignItems: { md: 'center' } }}
             >
               <FormControl size="small" sx={{ minWidth: { xs: '100%', md: 420 } }}>
                 <InputLabel id="link-risk-label">Добавить риск</InputLabel>
@@ -953,7 +973,7 @@ export function RiskObjectDetailsPage() {
                         <TableCell>{priorityLabels[row.priority]}</TableCell>
                         <TableCell>{row.enabled ? 'Активно' : 'Отключено'}</TableCell>
                         <TableCell align="right">
-                          <Stack direction="row" spacing={1} justifyContent="flex-end">
+                          <Stack direction="row" spacing={1} sx={{ justifyContent: 'flex-end' }}>
                             <Button
                               size="small"
                               variant="outlined"
@@ -1020,19 +1040,35 @@ export function RiskObjectDetailsPage() {
         </Paper>
       </Box>
 
+      {showScrollTopButton ? (
+        <Fab
+          color="primary"
+          size="medium"
+          aria-label="Прокрутить вверх"
+          onClick={handleScrollToTop}
+          sx={{
+            position: 'fixed',
+            right: 24,
+            bottom: 24,
+            zIndex: (theme) => theme.zIndex.snackbar + 1,
+          }}
+        >
+          <KeyboardArrowUpIcon />
+        </Fab>
+      ) : undefined}
+
       <Snackbar
         open={toastOpen}
         autoHideDuration={5600}
         onClose={handleToastClose}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-        slots={{ transition: Slide }}
+        slots={{ transition: ToastSlideTransition }}
         slotProps={{
           transition: {
             appear: true,
-            direction: 'up',
             timeout: { enter: 400, exit: 320 },
             onExited: handleToastExited,
-          } as SlideProps,
+          },
         }}
       >
         {toast ? (
@@ -1045,7 +1081,7 @@ export function RiskObjectDetailsPage() {
           >
             {toast.text}
           </Alert>
-        ) : null}
+        ) : undefined}
       </Snackbar>
     </Box>
   )

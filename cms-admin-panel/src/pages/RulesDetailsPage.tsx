@@ -27,14 +27,15 @@ import { useNavigate, useParams } from 'react-router-dom'
 import {
   getRiskCategories,
   getRiskObjectById,
-  getRiskObjects,
+  getRuleRiskObjects,
   getRisks,
   getRuleOverrides,
   getUsersList,
   putRuleOverrideById,
+  type RuleRiskObjectOption,
 } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
-import type { RiskObject, RiskObjectDetails } from '../types/riskObjects'
+import type { RiskObjectDetails } from '../types/riskObjects'
 import {
   actionLabels,
   buildRuleRows,
@@ -77,10 +78,11 @@ export function RulesDetailsPage() {
   const [error, setError] = useState<string | null>(null)
   const [saveInfo, setSaveInfo] = useState<string | null>(null)
   const [saveLoading, setSaveLoading] = useState(false)
+  const [scriptFileLoading, setScriptFileLoading] = useState(false)
   const [editingEnabled, setEditingEnabled] = useState(false)
 
   const [ruleRow, setRuleRow] = useState<RuleTableRow | null>(null)
-  const [riskObjects, setRiskObjects] = useState<RiskObject[]>([])
+  const [riskObjects, setRiskObjects] = useState<RuleRiskObjectOption[]>([])
   const [riskObjectPreviewOpen, setRiskObjectPreviewOpen] = useState(false)
   const [riskObjectPreviewLoading, setRiskObjectPreviewLoading] = useState(false)
   const [riskObjectPreviewError, setRiskObjectPreviewError] = useState<string | null>(null)
@@ -95,12 +97,12 @@ export function RulesDetailsPage() {
     let cancelled = false
     Promise.all([
       getRisks(token, user?.companyId),
-      getRiskObjects(token, 1, 200, user?.companyId),
+      getRuleRiskObjects(token, user?.companyId),
       getUsersList(token, user?.companyId),
       getRiskCategories(token, user?.companyId),
       getRuleOverrides(token, user?.companyId),
     ])
-      .then(([risks, riskObjectPage, usersRaw, categoryItems, overrides]) => {
+      .then(([risks, riskObjectItems, usersRaw, categoryItems, overrides]) => {
         if (cancelled) return
         const rows = buildRuleRows(risks, overrides, categoryItems)
         const row = rows.find((item) => item.id === id)
@@ -109,12 +111,17 @@ export function RulesDetailsPage() {
           return
         }
         const persisted = overrides[id] as RuleOverrides | undefined
+        const persistedRiskObjectId = persisted?.riskObjectId ?? row.riskObjectId
+        const selectedRiskObject =
+          riskObjectItems.find(
+            (item) => item.uuid === persistedRiskObjectId || item.id === persistedRiskObjectId,
+          ) ?? null
         setRuleRow(row)
-        setRiskObjects(riskObjectPage.items)
+        setRiskObjects(riskObjectItems)
         setCategories(categoryItems)
         setUsers(normalizeUsers(usersRaw))
         setDraft({
-          riskObjectId: persisted?.riskObjectId ?? row.riskObjectId,
+          riskObjectId: selectedRiskObject?.uuid ?? persistedRiskObjectId,
           mechanismScriptName: persisted?.mechanismScriptName ?? '',
           mechanismScriptContent: persisted?.mechanismScriptContent ?? '',
           categoryId: persisted?.categoryId ?? row.categoryId,
@@ -149,12 +156,14 @@ export function RulesDetailsPage() {
 
   async function handleOpenRiskObjectPreview() {
     if (!token || !draft?.riskObjectId) return
+    const selectedRiskObject = riskObjects.find((item) => item.uuid === draft.riskObjectId)
+    const detailsId = selectedRiskObject?.detailsId ?? selectedRiskObject?.id ?? draft.riskObjectId
     setRiskObjectPreviewOpen(true)
     setRiskObjectPreviewLoading(true)
     setRiskObjectPreviewError(null)
     setRiskObjectPreview(null)
     try {
-      const details = await getRiskObjectById(token, draft.riskObjectId, user?.companyId)
+      const details = await getRiskObjectById(token, detailsId, user?.companyId)
       setRiskObjectPreview(details)
     } catch (e: unknown) {
       setRiskObjectPreviewError(
@@ -178,6 +187,10 @@ export function RulesDetailsPage() {
     if (!canManageRulesAndRisks) return
     if (!token) return
     if (!id || !draft) return
+    if (scriptFileLoading) {
+      setError('Дождитесь загрузки содержимого файла скрипта')
+      return
+    }
     setSaveLoading(true)
     try {
       await putRuleOverrideById(token, id, draft, user?.companyId)
@@ -236,7 +249,11 @@ export function RulesDetailsPage() {
           >
             Категории риска
           </Button>
-          <Button variant="contained" onClick={() => void handleSave()} disabled={!canEdit || saveLoading}>
+          <Button
+            variant="contained"
+            onClick={() => void handleSave()}
+            disabled={!canEdit || saveLoading || scriptFileLoading}
+          >
             Сохранить
           </Button>
         </Stack>
@@ -283,8 +300,8 @@ export function RulesDetailsPage() {
             disabled={!canEdit || riskObjects.length === 0}
           >
             {riskObjects.map((riskObject) => (
-              <MenuItem key={riskObject.id} value={riskObject.id}>
-                {riskObject.code} - {riskObject.name}
+              <MenuItem key={riskObject.uuid} value={riskObject.uuid}>
+                {riskObject.code ? `${riskObject.code} - ${riskObject.name}` : riskObject.name}
               </MenuItem>
             ))}
           </Select>
@@ -324,18 +341,38 @@ export function RulesDetailsPage() {
               accept=".groovy,text/x-groovy,.txt"
               onChange={(event) => {
                 const file = event.target.files?.[0]
+                event.target.value = ''
                 if (!file) return
-                void file.text().then((content) => {
-                  setDraft((prev) =>
-                    prev
-                      ? {
-                          ...prev,
-                          mechanismScriptName: file.name,
-                          mechanismScriptContent: content,
-                        }
-                      : prev,
-                  )
-                })
+                setScriptFileLoading(true)
+                setError(null)
+                void file
+                  .text()
+                  .then((content) => {
+                    setDraft((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            mechanismScriptName: file.name,
+                            mechanismScriptContent: content,
+                          }
+                        : prev,
+                    )
+                  })
+                  .catch(() => {
+                    setDraft((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            mechanismScriptName: file.name,
+                            mechanismScriptContent: '',
+                          }
+                        : prev,
+                    )
+                    setError('Не удалось прочитать файл скрипта')
+                  })
+                  .finally(() => {
+                    setScriptFileLoading(false)
+                  })
               }}
             />
           </Button>
@@ -346,6 +383,11 @@ export function RulesDetailsPage() {
             fullWidth
             InputProps={{ readOnly: true }}
           />
+          {scriptFileLoading ? (
+            <Typography variant="caption" color="text.secondary">
+              Чтение файла скрипта...
+            </Typography>
+          ) : null}
         </Stack>
 
         <FormControl fullWidth>

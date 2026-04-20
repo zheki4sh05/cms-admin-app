@@ -388,7 +388,7 @@ export function UsersPage() {
                         checked={r.status === 'active'}
                         onChange={(e) => void handleStatusToggle(r.id, e.target.checked)}
                         disabled={!canManageTargetUser(r) || statusUpdatingId === r.id}
-                        inputProps={{ 'aria-label': `Статус пользователя ${r.name}` }}
+                        slotProps={{ input: { 'aria-label': `Статус пользователя ${r.name}` } }}
                       />
                     </TableCell>
                     <TableCell>

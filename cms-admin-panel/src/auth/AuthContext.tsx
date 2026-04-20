@@ -21,6 +21,212 @@ import type { AppUser } from '../types/user'
 const STORAGE_KEY = 'trustflow_access_token'
 const REFRESH_STORAGE_KEY = 'trustflow_refresh_token'
 const COMPANY_ID_STORAGE_KEY = 'trustflow_company_id'
+const USER_STORAGE_KEY = 'trustflow_me'
+
+function getStoredCompanyIdFromKey(): string | undefined {
+  if (typeof window === 'undefined') return undefined
+  const v = localStorage.getItem(COMPANY_ID_STORAGE_KEY)?.trim()
+  return v || undefined
+}
+
+function readStoredUser(): AppUser | null {
+  if (typeof window === 'undefined') return null
+  const raw = localStorage.getItem(USER_STORAGE_KEY)
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw) as Partial<AppUser>
+    if (
+      typeof parsed.id === 'string' &&
+      typeof parsed.name === 'string' &&
+      typeof parsed.email === 'string' &&
+      typeof parsed.role === 'string'
+    ) {
+      const companyId =
+        (typeof parsed.companyId === 'string' && parsed.companyId.trim()) ||
+        getStoredCompanyIdFromKey() ||
+        ''
+      if (!companyId.trim()) return null
+      return { ...parsed, companyId } as AppUser
+    }
+  } catch {
+    // Ignore malformed stored user and continue with fresh auth state.
+  }
+  return null
+}
+
+function persistUser(user: AppUser) {
+  localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(user))
+}
+
+function asRecord(v: unknown): Record<string, unknown> | null {
+  return v && typeof v === 'object' ? (v as Record<string, unknown>) : null
+}
+
+function pickString(v: unknown): string | undefined {
+  return typeof v === 'string' && v.trim() ? v.trim() : undefined
+}
+
+/** Строка или число (часто id приходит как number в JSON). */
+function pickScalarString(v: unknown): string | undefined {
+  if (typeof v === 'string' && v.trim()) return v.trim()
+  if (typeof v === 'number' && Number.isFinite(v)) return String(v)
+  return undefined
+}
+
+function pickId(r: Record<string, unknown>, stored: AppUser | null): string | undefined {
+  return (
+    pickScalarString(r.id) ??
+    pickScalarString(r.Id) ??
+    pickScalarString(r.userId) ??
+    pickScalarString(r.UserId) ??
+    pickScalarString(r.user_id) ??
+    pickScalarString(r.sub) ??
+    stored?.id
+  )
+}
+
+function pickDisplayName(r: Record<string, unknown>, stored: AppUser | null): string | undefined {
+  const combined =
+    [pickString(r.firstName) ?? pickString(r.FirstName), pickString(r.lastName) ?? pickString(r.LastName)]
+      .filter(Boolean)
+      .join(' ')
+      .trim()
+  return (
+    pickString(r.name) ??
+    pickString(r.Name) ??
+    pickString(r.fullName) ??
+    pickString(r.FullName) ??
+    pickString(r.displayName) ??
+    pickString(r.DisplayName) ??
+    pickString(r.userName) ??
+    pickString(r.UserName) ??
+    (combined || undefined) ??
+    stored?.name
+  )
+}
+
+function pickEmail(r: Record<string, unknown>, stored: AppUser | null): string | undefined {
+  return pickString(r.email) ?? pickString(r.Email) ?? stored?.email
+}
+
+function pickRoleValue(r: Record<string, unknown>, stored: AppUser | null): string | undefined {
+  const direct =
+    pickString(r.role) ??
+    pickString(r.Role) ??
+    pickString(r.userRole) ??
+    pickString(r.UserRole) ??
+    stored?.role
+  if (direct) return direct
+  const arr = (r.roles ?? r.Roles) as unknown
+  if (Array.isArray(arr) && arr.length > 0) {
+    const first = arr[0]
+    return pickScalarString(first) ?? pickString(first)
+  }
+  return undefined
+}
+
+function pickCompanyIdValue(r: Record<string, unknown>, stored: AppUser | null): string | undefined {
+  return (
+    pickString(r.companyId) ??
+    pickString(r.CompanyId) ??
+    pickString(r.company_id) ??
+    pickString(r.companyID) ??
+    pickScalarString(r.organizationId) ??
+    pickScalarString(r.OrganizationId) ??
+    pickScalarString(r.orgId) ??
+    pickScalarString(r.OrgId) ??
+    pickScalarString(r.tenantId) ??
+    pickScalarString(r.TenantId) ??
+    stored?.companyId?.trim() ??
+    getStoredCompanyIdFromKey()
+  )
+}
+
+/** Для сообщения об ошибке: какие поля не удалось извлечь из ответа логина / me. */
+function formatMissingProfileHint(raw: unknown): string {
+  const r = asRecord(unwrapProfilePayload(raw))
+  if (!r) {
+    return 'тело user пустое или не объект. Нужен JSON-объект пользователя.'
+  }
+  const stored = readStoredUser()
+  const missing: string[] = []
+  if (!pickId(r, stored)) missing.push('id (или Id, userId, sub, …)')
+  if (!pickDisplayName(r, stored)) missing.push('name (или Name, fullName, displayName, firstName+lastName, …)')
+  if (!pickEmail(r, stored)) missing.push('email (или Email)')
+  if (!pickRoleValue(r, stored)) missing.push('role (или Role, roles[0], …)')
+  if (!pickCompanyIdValue(r, stored)?.trim()) {
+    missing.push('companyId (или CompanyId, organizationId, tenantId, …) либо уже сохранённый trustflow_company_id')
+  }
+  if (missing.length === 0) {
+    return 'не удалось сопоставить поля с ожидаемым форматом (см. консоль разработчика → ответ login).'
+  }
+  return `не хватает: ${missing.join('; ')}`
+}
+
+/** Распространённые варианты вложения тела профиля в ответе API. */
+function unwrapProfilePayload(apiData: unknown): unknown {
+  const r = asRecord(apiData)
+  if (!r) return apiData
+  const nested =
+    r.data ??
+    r.user ??
+    r.profile ??
+    r.employee ??
+    r.me ??
+    r.item
+  return nested !== undefined ? nested : apiData
+}
+
+/** Привести произвольный объект пользователя с API к AppUser (login / me). */
+function normalizeAppUser(raw: unknown, stored: AppUser | null): AppUser | null {
+  const r = asRecord(unwrapProfilePayload(raw))
+  if (!r) return stored
+  const id = pickId(r, stored)
+  const name = pickDisplayName(r, stored)
+  const email = pickEmail(r, stored)
+  const role = pickRoleValue(r, stored)
+  const companyId = pickCompanyIdValue(r, stored) ?? ''
+  if (!id?.trim() || !name?.trim() || !email?.trim() || !role?.trim() || !companyId.trim()) {
+    return stored
+  }
+  return { id, name, email, role, companyId }
+}
+
+/** Свести ответ GET /me с данными из localStorage (после login бэкенд может отдавать не все поля). */
+function mergeSessionUser(apiData: unknown, stored: AppUser | null): AppUser | null {
+  return normalizeAppUser(apiData, stored)
+}
+
+async function loadPermissionsSafe(
+  token: string,
+  user: AppUser,
+): Promise<AccessPermission[]> {
+  try {
+    return await getMyPermissions(token, user.id, user.companyId)
+  } catch {
+    return []
+  }
+}
+
+function clearStoredAppData() {
+  if (typeof window === 'undefined') return
+
+  const appKeyPrefix = 'trustflow_'
+  const localStorageKeys = Object.keys(localStorage)
+  for (const key of localStorageKeys) {
+    if (key.startsWith(appKeyPrefix)) {
+      localStorage.removeItem(key)
+    }
+  }
+
+  // Keep logout deterministic even if app starts using sessionStorage later.
+  const sessionStorageKeys = Object.keys(sessionStorage)
+  for (const key of sessionStorageKeys) {
+    if (key.startsWith(appKeyPrefix)) {
+      sessionStorage.removeItem(key)
+    }
+  }
+}
 
 type AuthContextValue = {
   user: AppUser | null
@@ -43,7 +249,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [refreshToken, setRefreshToken] = useState<string | null>(() =>
     typeof window !== 'undefined' ? localStorage.getItem(REFRESH_STORAGE_KEY) : null,
   )
-  const [user, setUser] = useState<AppUser | null>(null)
+  const [user, setUser] = useState<AppUser | null>(() => readStoredUser())
   const [permissions, setPermissions] = useState<AccessPermission[]>([])
   const [loading, setLoading] = useState(Boolean(token))
   const tokenRef = useRef(token)
@@ -59,9 +265,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refreshToken])
 
   const logout = useCallback(() => {
-    localStorage.removeItem(STORAGE_KEY)
-    localStorage.removeItem(REFRESH_STORAGE_KEY)
-    localStorage.removeItem(COMPANY_ID_STORAGE_KEY)
+    clearStoredAppData()
     setToken(null)
     setRefreshToken(null)
     setUser(null)
@@ -121,16 +325,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setPermissions([])
       return
     }
-    const data = (await getMe(token)) as AppUser
-    const nextPermissions = await getMyPermissions(token, data.companyId)
-    if (data.companyId?.trim()) {
-      localStorage.setItem(COMPANY_ID_STORAGE_KEY, data.companyId)
+    const raw = await getMe(token)
+    const nextUser = mergeSessionUser(raw, readStoredUser())
+    if (!nextUser) {
+      logout()
+      return
+    }
+    if (nextUser.companyId?.trim()) {
+      localStorage.setItem(COMPANY_ID_STORAGE_KEY, nextUser.companyId)
     } else {
       localStorage.removeItem(COMPANY_ID_STORAGE_KEY)
     }
-    setUser(data)
+    const nextPermissions = await loadPermissionsSafe(token, nextUser)
+    persistUser(nextUser)
+    setUser(nextUser)
     setPermissions(nextPermissions)
-  }, [token])
+  }, [token, logout])
 
   useEffect(() => {
     if (!token) {
@@ -143,14 +353,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setLoading(true)
     getMe(token)
       .then(async (data) => {
-        const nextUser = data as AppUser
-        const nextPermissions = await getMyPermissions(token, nextUser.companyId)
+        const nextUser = mergeSessionUser(data, readStoredUser())
+        if (!nextUser) {
+          throw new Error('Некорректный ответ профиля')
+        }
+        if (nextUser.companyId?.trim()) {
+          localStorage.setItem(COMPANY_ID_STORAGE_KEY, nextUser.companyId)
+        } else {
+          localStorage.removeItem(COMPANY_ID_STORAGE_KEY)
+        }
+        const nextPermissions = await loadPermissionsSafe(token, nextUser)
         if (!cancelled) {
-          if (nextUser.companyId?.trim()) {
-            localStorage.setItem(COMPANY_ID_STORAGE_KEY, nextUser.companyId)
-          } else {
-            localStorage.removeItem(COMPANY_ID_STORAGE_KEY)
-          }
+          persistUser(nextUser)
           setUser(nextUser)
           setPermissions(nextPermissions)
         }
@@ -171,20 +385,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [token, logout])
 
   const login = useCallback(async (email: string, password: string) => {
-    const { accessToken, refreshToken: nextRefreshToken, user: nextUser } = await postLogin(
+    const { accessToken, refreshToken: nextRefreshToken, user: rawUser } = await postLogin(
       email,
       password,
     )
+    const nextUser = normalizeAppUser(rawUser, readStoredUser())
+    if (!nextUser) {
+      throw new Error(
+        `Некорректный ответ сервера: профиль пользователя — ${formatMissingProfileHint(rawUser)}`,
+      )
+    }
     localStorage.setItem(STORAGE_KEY, accessToken)
     localStorage.setItem(REFRESH_STORAGE_KEY, nextRefreshToken)
-    if ((nextUser as AppUser).companyId?.trim()) {
-      localStorage.setItem(COMPANY_ID_STORAGE_KEY, (nextUser as AppUser).companyId)
+    if (nextUser.companyId.trim()) {
+      localStorage.setItem(COMPANY_ID_STORAGE_KEY, nextUser.companyId)
     } else {
       localStorage.removeItem(COMPANY_ID_STORAGE_KEY)
     }
     setToken(accessToken)
     setRefreshToken(nextRefreshToken)
-    setUser(nextUser as AppUser)
+    persistUser(nextUser)
+    setUser(nextUser)
     setPermissions([])
   }, [])
 

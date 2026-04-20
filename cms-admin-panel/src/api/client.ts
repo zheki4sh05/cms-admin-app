@@ -110,6 +110,14 @@ function getStoredCompanyId(): string | null {
   return trimmed ? trimmed : null
 }
 
+function requireCompanyId(companyId?: string | null): string {
+  const effective = companyId?.trim() || getStoredCompanyId()
+  if (!effective) {
+    throw new Error('Не указан идентификатор компании')
+  }
+  return effective
+}
+
 function authHeaders(token: string | null, companyId?: string | null): HeadersInit {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -122,6 +130,53 @@ function authHeaders(token: string | null, companyId?: string | null): HeadersIn
     headers.CompanyId = effectiveCompanyId
   }
   return headers
+}
+
+function parseDefinitionObject(rawJson: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(rawJson) as unknown
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>
+    }
+  } catch {
+    // Ignore malformed JSON and fail below with a unified message.
+  }
+  throw new Error('Некорректный ответ сервера')
+}
+
+function normalizeIntegrationNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (!trimmed) return null
+    const parsed = Number(trimmed)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return null
+}
+
+function normalizeIntegrationStatus(value: unknown): IntegrationDetails['status'] | null {
+  return value === 'active' || value === 'inactive' ? value : null
+}
+
+function normalizeIntegrationKind(value: unknown): IntegrationDetails['integrationKind'] | null {
+  return value === 'pull' || value === 'push' || value === 'broker' ? value : null
+}
+
+function normalizeIntegrationMappingRules(value: unknown): IntegrationDetails['mapping_rules'] | null {
+  if (!Array.isArray(value)) return null
+  const normalized: IntegrationDetails['mapping_rules'] = []
+  for (const item of value) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue
+    const obj = item as Record<string, unknown>
+    if (typeof obj.from !== 'string' || typeof obj.to !== 'string') continue
+    normalized.push({
+      from: obj.from,
+      to: obj.to,
+      ...(typeof obj.transform === 'string' ? { transform: obj.transform } : {}),
+    })
+  }
+  return normalized
 }
 
 export async function postLogin(email: string, password: string) {
@@ -209,24 +264,6 @@ export async function getCompanyByEmployeeId(
   }
 }
 
-export async function getMyPermissions(
-  token: string,
-  companyId?: string | null,
-): Promise<AccessPermission[]> {
-  const res = await fetch(apiUrl('me/permissions'), {
-    headers: authHeaders(token, companyId),
-  })
-  const data = (await res.json().catch(() => ({}))) as {
-    message?: string
-    items?: AccessPermission[]
-  }
-  if (!res.ok) {
-    throw new Error(data.message ?? 'Ошибка загрузки прав доступа')
-  }
-  return data.items ?? []
-}
-
-
 export async function getDashboardSummary(token: string) {
   const res = await fetch(apiUrl('dashboard/summary'), {
     headers: authHeaders(token),
@@ -281,6 +318,14 @@ export type RuleListItemDto = {
   priority: RulePriorityDto
   enabled: boolean
   riskObjectId: string
+}
+
+export type RuleRiskObjectOption = {
+  id: string
+  uuid: string
+  code: string
+  name: string
+  detailsId?: string
 }
 
 export async function getIntegrationChangeHistory(
@@ -340,8 +385,36 @@ export async function getIntegrationConfigs(
   if (!res.ok) {
     throw new Error(data.message ?? 'Не удалось загрузить конфигурации')
   }
+  const items = Array.isArray(data.items)
+    ? data.items
+        .map((item) => {
+          if (!item || typeof item !== 'object' || Array.isArray(item)) return null
+          const row = item as Record<string, unknown>
+          const number = normalizeIntegrationNumber(row.number)
+          const status = normalizeIntegrationStatus(row.status)
+          if (
+            typeof row.id !== 'string' ||
+            number === null ||
+            typeof row.name !== 'string' ||
+            typeof row.updatedAt !== 'string' ||
+            status === null ||
+            typeof row.authorName !== 'string'
+          ) {
+            return null
+          }
+          return {
+            id: row.id,
+            number,
+            name: row.name,
+            updatedAt: row.updatedAt,
+            status,
+            authorName: row.authorName,
+          } satisfies IntegrationConfig
+        })
+        .filter((item): item is IntegrationConfig => item !== null)
+    : []
   return {
-    items: (data.items ?? []) as IntegrationConfig[],
+    items,
     hasMore: Boolean(data.hasMore),
   }
 }
@@ -359,21 +432,36 @@ export async function getIntegrationConfigById(
   if (!res.ok) {
     throw new Error(data.message ?? 'Не удалось загрузить интеграцию')
   }
+  const number = normalizeIntegrationNumber(data.number)
+  const integrationKind = normalizeIntegrationKind(data.integrationKind)
+  const mappingRules = normalizeIntegrationMappingRules(data.mapping_rules)
+  const status = normalizeIntegrationStatus(data.status)
   if (
-    !data.id ||
-    typeof data.number !== 'number' ||
-    !data.name ||
-    !data.integrationKind ||
-    !data.endpointUrl ||
-    !data.riskObjectModelId ||
-    !Array.isArray(data.mapping_rules) ||
-    !data.status ||
-    !data.authorName ||
-    !data.updatedAt
+    typeof data.id !== 'string' ||
+    number === null ||
+    typeof data.name !== 'string' ||
+    integrationKind === null ||
+    typeof data.endpointUrl !== 'string' ||
+    typeof data.riskObjectModelId !== 'string' ||
+    mappingRules === null ||
+    status === null ||
+    typeof data.authorName !== 'string' ||
+    typeof data.updatedAt !== 'string'
   ) {
     throw new Error('Некорректный ответ сервера')
   }
-  return data as IntegrationDetails
+  return {
+    id: data.id,
+    number,
+    name: data.name,
+    integrationKind,
+    endpointUrl: data.endpointUrl,
+    riskObjectModelId: data.riskObjectModelId,
+    mapping_rules: mappingRules,
+    status,
+    authorName: data.authorName,
+    updatedAt: data.updatedAt,
+  }
 }
 
 export async function putIntegrationConfigById(
@@ -448,8 +536,9 @@ export async function putIntegrationConfigStatusById(
 }
 
 export async function getUsersList(token: string, companyId?: string | null) {
+  const effectiveCompanyId = requireCompanyId(companyId)
   const res = await fetch(apiUrl('users'), {
-    headers: authHeaders(token, companyId),
+    headers: authHeaders(token, effectiveCompanyId),
   })
   const data = (await res.json().catch(() => ({}))) as {
     message?: string
@@ -466,8 +555,9 @@ export async function getUserAccessPermissions(
   userId: string,
   companyId?: string | null,
 ): Promise<AccessPermission[]> {
+  const effectiveCompanyId = requireCompanyId(companyId)
   const res = await fetch(apiUrl(`users/${userId}/access`), {
-    headers: authHeaders(token, companyId),
+    headers: authHeaders(token, effectiveCompanyId),
   })
   const data = (await res.json().catch(() => ({}))) as {
     message?: string
@@ -479,15 +569,25 @@ export async function getUserAccessPermissions(
   return data.accessPermissions ?? []
 }
 
+/** Права текущего пользователя: `GET /api/users/{userId}/access`. */
+export async function getMyPermissions(
+  token: string,
+  userId: string,
+  companyId?: string | null,
+): Promise<AccessPermission[]> {
+  return getUserAccessPermissions(token, userId, companyId)
+}
+
 export async function putUserAccessPermissions(
   token: string,
   userId: string,
   accessPermissions: AccessPermission[],
   companyId?: string | null,
 ): Promise<AccessPermission[]> {
+  const effectiveCompanyId = requireCompanyId(companyId)
   const res = await fetch(apiUrl(`users/${userId}/access`), {
     method: 'PUT',
-    headers: authHeaders(token, companyId),
+    headers: authHeaders(token, effectiveCompanyId),
     body: JSON.stringify({ accessPermissions }),
   })
   const data = (await res.json().catch(() => ({}))) as {
@@ -626,11 +726,84 @@ export async function getRisks(token: string, companyId?: string | null): Promis
   return data.items ?? []
 }
 
+function normalizeRuleRiskObjectOptions(items: unknown[]): RuleRiskObjectOption[] {
+  return items
+    .map((item) => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) return null
+      const row = item as Record<string, unknown>
+      const uuidCandidate =
+        (typeof row.uuid === 'string' && row.uuid.trim()) ||
+        (typeof row.riskObjectUuid === 'string' && row.riskObjectUuid.trim()) ||
+        (typeof row.risk_object_uuid === 'string' && row.risk_object_uuid.trim()) ||
+        (typeof row.id === 'string' && row.id.trim()) ||
+        ''
+      const idCandidate =
+        (typeof row.id === 'string' && row.id.trim()) ||
+        (typeof row.riskObjectId === 'string' && row.riskObjectId.trim()) ||
+        (typeof row.risk_object_id === 'string' && row.risk_object_id.trim()) ||
+        uuidCandidate
+      const name =
+        (typeof row.name === 'string' && row.name.trim()) ||
+        (typeof row.riskObjectName === 'string' && row.riskObjectName.trim()) ||
+        ''
+      if (!uuidCandidate || !idCandidate || !name) return null
+      const code =
+        (typeof row.code === 'string' && row.code.trim()) ||
+        (typeof row.riskObjectCode === 'string' && row.riskObjectCode.trim()) ||
+        ''
+      return {
+        id: idCandidate,
+        uuid: uuidCandidate,
+        code,
+        name,
+        detailsId: idCandidate,
+      } satisfies RuleRiskObjectOption
+    })
+    .filter((item): item is RuleRiskObjectOption => item !== null)
+}
+
+export async function getRuleRiskObjects(
+  token: string,
+  companyId?: string | null,
+): Promise<RuleRiskObjectOption[]> {
+  const res = await fetch(apiUrl('risk-object-models'), {
+    headers: authHeaders(token, companyId),
+  })
+  const data = (await res.json().catch(() => ({}))) as {
+    message?: string
+    items?: unknown[]
+  }
+  if (!res.ok) {
+    if (res.status === 404) {
+      const legacy = await getRiskObjects(token, 1, 500, companyId)
+      return legacy.items.map((item) => ({
+        id: item.id,
+        uuid: item.id,
+        code: item.code,
+        name: item.name,
+        detailsId: item.id,
+      }))
+    }
+    throw new Error(data.message ?? 'Не удалось загрузить рисковые объекты')
+  }
+  if (!Array.isArray(data.items)) return []
+  const normalized = normalizeRuleRiskObjectOptions(data.items)
+  if (normalized.length > 0 || data.items.length === 0) return normalized
+  const legacy = await getRiskObjects(token, 1, 500, companyId)
+  return legacy.items.map((item) => ({
+    id: item.id,
+    uuid: item.id,
+    code: item.code,
+    name: item.name,
+    detailsId: item.id,
+  }))
+}
+
 export async function getRulesList(
   token: string,
   companyId?: string | null,
 ): Promise<RuleListItemDto[]> {
-  const res = await fetch(apiUrl('rules'), {
+  const res = await fetch(apiUrl('risks'), {
     headers: authHeaders(token, companyId),
   })
   const data = (await res.json().catch(() => ({}))) as {
@@ -811,7 +984,7 @@ export async function postRuleCreate(
   payload: RuleCreatePayload,
   companyId?: string | null,
 ): Promise<RuleCreateResponse> {
-  const res = await fetch(apiUrl('rules'), {
+  const res = await fetch(apiUrl('risks'), {
     method: 'POST',
     headers: authHeaders(token, companyId),
     body: JSON.stringify(payload),
@@ -887,15 +1060,23 @@ export async function getRiskObjectModelById(token: string, id: string): Promise
     message?: string
     id?: string
     name?: string
-    definition?: Record<string, unknown>
+    definition?: unknown
   }
   if (!res.ok) {
     throw new Error(data.message ?? 'Не удалось загрузить модель рискового объекта')
   }
-  if (!data.id || !data.name || !data.definition) {
+  if (!data.id || !data.name || data.definition === undefined || data.definition === null) {
     throw new Error('Некорректный ответ сервера')
   }
-  return { id: data.id, name: data.name, definition: data.definition }
+  let definition: Record<string, unknown>
+  if (typeof data.definition === 'string') {
+    definition = parseDefinitionObject(data.definition)
+  } else if (typeof data.definition === 'object' && !Array.isArray(data.definition)) {
+    definition = data.definition as Record<string, unknown>
+  } else {
+    throw new Error('Некорректный ответ сервера')
+  }
+  return { id: data.id, name: data.name, definition }
 }
 
 export async function getRiskObjectById(
@@ -913,7 +1094,7 @@ export async function getRiskObjectById(
     name?: string
     status?: RiskObjectDetails['status']
     updatedAt?: string
-    definition?: Record<string, unknown>
+    definition?: string
   }
   if (!res.ok) {
     throw new Error(data.message ?? 'Не удалось загрузить рисковый объект')
@@ -924,17 +1105,18 @@ export async function getRiskObjectById(
     !data.name ||
     !data.status ||
     !data.updatedAt ||
-    !data.definition
+    typeof data.definition !== 'string'
   ) {
     throw new Error('Некорректный ответ сервера')
   }
+  const definition = parseDefinitionObject(data.definition)
   return {
     id: data.id,
     code: data.code,
     name: data.name,
     status: data.status,
     updatedAt: data.updatedAt,
-    definition: data.definition,
+    definition,
   }
 }
 
