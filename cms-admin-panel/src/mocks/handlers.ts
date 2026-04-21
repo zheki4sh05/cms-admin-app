@@ -799,6 +799,12 @@ function normalizePullConfig(value: unknown): Record<string, unknown> | null {
     ...(typeof raw.pagedPollingEnabled === 'boolean'
       ? { pagedPollingEnabled: raw.pagedPollingEnabled }
       : {}),
+    ...(typeof raw.pagingOffsetParamKey === 'string'
+      ? { pagingOffsetParamKey: raw.pagingOffsetParamKey }
+      : {}),
+    ...(typeof raw.pagingLimitParamKey === 'string'
+      ? { pagingLimitParamKey: raw.pagingLimitParamKey }
+      : {}),
     ...(typeof raw.pageSize === 'number' && Number.isFinite(raw.pageSize)
       ? { pageSize: Math.max(1, Math.floor(raw.pageSize)) }
       : {}),

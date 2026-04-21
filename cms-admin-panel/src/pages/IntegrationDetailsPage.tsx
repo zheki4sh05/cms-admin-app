@@ -157,6 +157,8 @@ function createDefaultPullConfig(): PullIntegrationConfig {
     requestUri: '',
     requestQueryParams: [],
     pagedPollingEnabled: false,
+    pagingOffsetParamKey: '',
+    pagingLimitParamKey: '',
     pageSize: 100,
     sinceStartDateEnabled: false,
   }
@@ -235,13 +237,38 @@ export function IntegrationDetailsPage() {
     [modelDefinition],
   )
 
+  const isPullKind = integrationKind === 'pull'
+  const hasPagingEnabled = Boolean(pullConfig.pagedPollingEnabled)
+  const hasSinceStartEnabled = Boolean(pullConfig.sinceStartDateEnabled)
+
+  const availableQueryParamKeys = useMemo(() => {
+    const fromRows = pullQueryParams
+      .map((row) => row.key.trim())
+      .filter((key) => key !== '')
+    const fromConfig = (pullConfig.requestQueryParams ?? [])
+      .map((p) => p.key.trim())
+      .filter((key) => key !== '')
+    return [...new Set([...fromRows, ...fromConfig])].sort((a, b) => a.localeCompare(b))
+  }, [pullQueryParams, pullConfig.requestQueryParams])
+
   const previewJson = useMemo(() => {
-    const isPullKind = integrationKind === 'pull'
-    const hasPagingEnabled = Boolean(pullConfig.pagedPollingEnabled)
-    const hasSinceStartEnabled = Boolean(pullConfig.sinceStartDateEnabled)
-    const queryParams = pullQueryParams
+    const fromRows: PullRequestQueryParam[] = pullQueryParams
       .filter((row) => row.key.trim() !== '')
       .map((row) => ({ key: row.key.trim(), value: row.value.trim() }))
+    const fromConfig: PullRequestQueryParam[] = (pullConfig.requestQueryParams ?? []).map((p) => ({
+      key: p.key.trim(),
+      value: p.value.trim(),
+    }))
+
+    const mergedByKey = new Map<string, string>()
+    for (const p of fromConfig) {
+      mergedByKey.set(p.key, p.value)
+    }
+    for (const p of fromRows) {
+      mergedByKey.set(p.key, p.value)
+    }
+    const queryParams = Array.from(mergedByKey.entries()).map(([key, value]) => ({ key, value }))
+
     const normalizedPullPayload: PullIntegrationConfig | null = isPullKind
       ? {
           pollingPreset: pullConfig.pollingPreset ?? 'hour',
@@ -258,6 +285,12 @@ export function IntegrationDetailsPage() {
           ...(pullConfig.requestUri?.trim() ? { requestUri: pullConfig.requestUri.trim() } : {}),
           ...(queryParams.length > 0 ? { requestQueryParams: queryParams } : {}),
           pagedPollingEnabled: hasPagingEnabled,
+          ...(hasPagingEnabled && pullConfig.pagingOffsetParamKey?.trim()
+            ? { pagingOffsetParamKey: pullConfig.pagingOffsetParamKey.trim() }
+            : {}),
+          ...(hasPagingEnabled && pullConfig.pagingLimitParamKey?.trim()
+            ? { pagingLimitParamKey: pullConfig.pagingLimitParamKey.trim() }
+            : {}),
           ...(hasPagingEnabled ? { pageSize: Math.max(1, Number(pullConfig.pageSize) || 1) } : {}),
           sinceStartDateEnabled: hasSinceStartEnabled,
         }
@@ -274,17 +307,26 @@ export function IntegrationDetailsPage() {
     } catch {
       return '{"mapping_rules":[]}'
     }
-  }, [integrationKind, mappingRows, pullConfig, pullQueryParams])
-
-  const isPullKind = integrationKind === 'pull'
-  const hasPagingEnabled = Boolean(pullConfig.pagedPollingEnabled)
-  const hasSinceStartEnabled = Boolean(pullConfig.sinceStartDateEnabled)
+  }, [integrationKind, hasPagingEnabled, hasSinceStartEnabled, isPullKind, mappingRows, pullConfig, pullQueryParams])
 
   const normalizedPullPayload = useMemo<PullIntegrationConfig | null>(() => {
     if (!isPullKind) return null
-    const queryParams = pullQueryParams
+    const fromRows: PullRequestQueryParam[] = pullQueryParams
       .filter((row) => row.key.trim() !== '')
       .map((row) => ({ key: row.key.trim(), value: row.value.trim() }))
+    const fromConfig: PullRequestQueryParam[] = (pullConfig.requestQueryParams ?? []).map((p) => ({
+      key: p.key.trim(),
+      value: p.value.trim(),
+    }))
+
+    const mergedByKey = new Map<string, string>()
+    for (const p of fromConfig) {
+      mergedByKey.set(p.key, p.value)
+    }
+    for (const p of fromRows) {
+      mergedByKey.set(p.key, p.value)
+    }
+    const queryParams = Array.from(mergedByKey.entries()).map(([key, value]) => ({ key, value }))
     return {
       pollingPreset: pullConfig.pollingPreset ?? 'hour',
       ...(pullConfig.pollingPreset === 'minutes'
@@ -300,6 +342,12 @@ export function IntegrationDetailsPage() {
       ...(pullConfig.requestUri?.trim() ? { requestUri: pullConfig.requestUri.trim() } : {}),
       ...(queryParams.length > 0 ? { requestQueryParams: queryParams } : {}),
       pagedPollingEnabled: hasPagingEnabled,
+      ...(hasPagingEnabled && pullConfig.pagingOffsetParamKey?.trim()
+        ? { pagingOffsetParamKey: pullConfig.pagingOffsetParamKey.trim() }
+        : {}),
+      ...(hasPagingEnabled && pullConfig.pagingLimitParamKey?.trim()
+        ? { pagingLimitParamKey: pullConfig.pagingLimitParamKey.trim() }
+        : {}),
       ...(hasPagingEnabled ? { pageSize: Math.max(1, Number(pullConfig.pageSize) || 1) } : {}),
       sinceStartDateEnabled: hasSinceStartEnabled,
     }
@@ -487,10 +535,17 @@ export function IntegrationDetailsPage() {
         })
         return
       }
-      if (payload.pullConfig?.pagedPollingEnabled && !payload.pullConfig.pageSize) {
+      if (payload.pullConfig?.pagedPollingEnabled && !payload.pullConfig.pagingOffsetParamKey) {
         showToast({
           severity: 'error',
-          text: 'Для постраничного опроса укажите количество записей за раз.',
+          text: 'Для постраничного опроса выберите параметр "сколько пропустить".',
+        })
+        return
+      }
+      if (payload.pullConfig?.pagedPollingEnabled && !payload.pullConfig.pagingLimitParamKey) {
+        showToast({
+          severity: 'error',
+          text: 'Для постраничного опроса выберите параметр "количество на странице".',
         })
         return
       }
@@ -952,8 +1007,39 @@ export function IntegrationDetailsPage() {
                       checked={hasPagingEnabled}
                       onChange={(e) => {
                         const checked = e.target.checked
+                        if (checked && availableQueryParamKeys.length === 0) {
+                          const pageSize = Math.max(1, Number(pullConfig.pageSize) || 1)
+                          setPullConfig((prev) => {
+                            return {
+                              ...prev,
+                              pagedPollingEnabled: true,
+                              sinceStartDateEnabled: false,
+                              requestQueryParams: [
+                                { key: 'offset', value: '0' },
+                                { key: 'limit', value: String(pageSize) },
+                              ],
+                              pagingOffsetParamKey: 'offset',
+                              pagingLimitParamKey: 'limit',
+                            }
+                          })
+                          setPullQueryParams([
+                            { id: newId(), key: 'offset', value: '0' },
+                            { id: newId(), key: 'limit', value: String(pageSize) },
+                          ])
+                          showToast({
+                            severity: 'success',
+                            text: 'Добавлены параметры offset/limit для постраничного опроса.',
+                          })
+                          return
+                        }
                         patchPullConfig({
                           pagedPollingEnabled: checked,
+                          pagingOffsetParamKey: checked
+                            ? pullConfig.pagingOffsetParamKey || availableQueryParamKeys[0] || ''
+                            : '',
+                          pagingLimitParamKey: checked
+                            ? pullConfig.pagingLimitParamKey || availableQueryParamKeys[0] || ''
+                            : '',
                           sinceStartDateEnabled: checked ? false : hasSinceStartEnabled,
                         })
                       }}
@@ -962,6 +1048,66 @@ export function IntegrationDetailsPage() {
                   }
                   label="Постраничный опрос"
                 />
+
+                {!hasPagingEnabled && availableQueryParamKeys.length === 0 ? (
+                  <Typography variant="caption" color="text.secondary">
+                    Чтобы включить постраничный опрос, сначала добавьте параметры запроса.
+                  </Typography>
+                ) : null}
+
+                {hasPagingEnabled ? (
+                  <>
+                    <FormControl fullWidth size="small">
+                      <FormLabel sx={{ mb: 0.5, display: 'block', typography: 'body2', fontWeight: 500 }}>
+                        Параметр страницы (сколько пропустить)
+                      </FormLabel>
+                      <Select
+                        value={pullConfig.pagingOffsetParamKey ?? ''}
+                        onChange={(e) =>
+                          patchPullConfig({
+                            pagingOffsetParamKey: e.target.value as string,
+                          })
+                        }
+                        disabled={!canEdit}
+                        displayEmpty
+                      >
+                        <MenuItem value="">
+                          <em>— не выбрано —</em>
+                        </MenuItem>
+                        {availableQueryParamKeys.map((key) => (
+                          <MenuItem key={key} value={key}>
+                            {key}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+
+                    <FormControl fullWidth size="small">
+                      <FormLabel sx={{ mb: 0.5, display: 'block', typography: 'body2', fontWeight: 500 }}>
+                        Параметр размера страницы
+                      </FormLabel>
+                      <Select
+                        value={pullConfig.pagingLimitParamKey ?? ''}
+                        onChange={(e) =>
+                          patchPullConfig({
+                            pagingLimitParamKey: e.target.value as string,
+                          })
+                        }
+                        disabled={!canEdit}
+                        displayEmpty
+                      >
+                        <MenuItem value="">
+                          <em>— не выбрано —</em>
+                        </MenuItem>
+                        {availableQueryParamKeys.map((key) => (
+                          <MenuItem key={key} value={key}>
+                            {key}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  </>
+                ) : null}
 
                 <FormControlLabel
                   control={

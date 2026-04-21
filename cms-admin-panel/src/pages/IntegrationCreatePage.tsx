@@ -369,19 +369,34 @@ export function IntegrationCreatePage() {
 
   const hasPagingEnabled = Boolean(pullConfig.pagedPollingEnabled)
   const hasSinceStartEnabled = Boolean(pullConfig.sinceStartDateEnabled)
-  const availableQueryParamKeys = useMemo(
-    () =>
-      [...new Set(pullQueryParams.map((row) => row.key.trim()).filter((key) => key !== ''))].sort(
-        (a, b) => a.localeCompare(b),
-      ),
-    [pullQueryParams],
-  )
+  const availableQueryParamKeys = useMemo(() => {
+    const fromRows = pullQueryParams
+      .map((row) => row.key.trim())
+      .filter((key) => key !== '')
+    const fromConfig = (pullConfig.requestQueryParams ?? [])
+      .map((p) => p.key.trim())
+      .filter((key) => key !== '')
+    return [...new Set([...fromRows, ...fromConfig])].sort((a, b) => a.localeCompare(b))
+  }, [pullQueryParams, pullConfig.requestQueryParams])
 
   const normalizedPullPayload = useMemo<PullIntegrationConfig | null>(() => {
     if (!isPullKind) return null
-    const queryParams = pullQueryParams
+    const fromRows: PullRequestQueryParam[] = pullQueryParams
       .filter((row) => row.key.trim() !== '')
       .map((row) => ({ key: row.key.trim(), value: row.value.trim() }))
+    const fromConfig: PullRequestQueryParam[] = (pullConfig.requestQueryParams ?? []).map((p) => ({
+      key: p.key.trim(),
+      value: p.value.trim(),
+    }))
+
+    const mergedByKey = new Map<string, string>()
+    for (const p of fromConfig) {
+      mergedByKey.set(p.key, p.value)
+    }
+    for (const p of fromRows) {
+      mergedByKey.set(p.key, p.value)
+    }
+    const queryParams = Array.from(mergedByKey.entries()).map(([key, value]) => ({ key, value }))
     return {
       pollingPreset: pullConfig.pollingPreset ?? 'hour',
       ...(pullConfig.pollingPreset === 'minutes'
@@ -983,9 +998,27 @@ export function IntegrationCreatePage() {
                       onChange={(e) => {
                         const checked = e.target.checked
                         if (checked && availableQueryParamKeys.length === 0) {
+                          const pageSize = Math.max(1, Number(pullConfig.pageSize) || 1)
+                          setPullConfig((prev) => {
+                            return {
+                              ...prev,
+                              pagedPollingEnabled: true,
+                              sinceStartDateEnabled: false,
+                              requestQueryParams: [
+                                { key: 'offset', value: '0' },
+                                { key: 'limit', value: String(pageSize) },
+                              ],
+                              pagingOffsetParamKey: 'offset',
+                              pagingLimitParamKey: 'limit',
+                            }
+                          })
+                          setPullQueryParams([
+                            { id: newId(), key: 'offset', value: '0' },
+                            { id: newId(), key: 'limit', value: String(pageSize) },
+                          ])
                           showToast({
-                            severity: 'error',
-                            text: 'Сначала добавьте параметры запроса, затем включайте постраничный опрос.',
+                            severity: 'success',
+                            text: 'Добавлены параметры offset/limit для постраничного опроса.',
                           })
                           return
                         }
