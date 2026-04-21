@@ -1,12 +1,16 @@
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
+import AddIcon from '@mui/icons-material/Add'
 import ClearAllOutlinedIcon from '@mui/icons-material/ClearAllOutlined'
 import DeleteOutlinedIcon from '@mui/icons-material/DeleteOutlined'
 import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined'
 import SaveOutlinedIcon from '@mui/icons-material/SaveOutlined'
+import VisibilityIcon from '@mui/icons-material/Visibility'
+import VisibilityOffIcon from '@mui/icons-material/VisibilityOff'
 import {
   Alert,
   Box,
   Button,
+  Checkbox,
   CircularProgress,
   Dialog,
   DialogActions,
@@ -18,6 +22,7 @@ import {
   FormHelperText,
   FormLabel,
   IconButton,
+  InputAdornment,
   MenuItem,
   Paper,
   Select,
@@ -35,6 +40,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { SyntheticEvent } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
+  deleteIntegrationConfigById,
   getIntegrationConfigById,
   getRiskObjectModelById,
   getRiskObjectModels,
@@ -45,6 +51,9 @@ import { useAuth } from '../auth/AuthContext'
 import type {
   IntegrationDetails,
   IntegrationMappingRule,
+  PullIntegrationConfig,
+  PullPollingPreset,
+  PullRequestQueryParam,
   IntegrationStatusUpdatePayload,
   IntegrationUpdatePayload,
 } from '../types/integration'
@@ -61,14 +70,24 @@ type MappingRow = {
   applyJs: string
 }
 
+type PullRequestParamRow = {
+  id: string
+  key: string
+  value: string
+}
+
 type EditorSnapshot = {
   name: string
   integrationKind: IntegrationDetails['integrationKind']
   endpointUrl: string
   riskObjectModelId: string
+  pullConfig: PullIntegrationConfig
+  pullQueryParams: PullRequestParamRow[]
   status: IntegrationDetails['status']
   mappingRows: MappingRow[]
 }
+
+const PULL_POLLING_PRESETS: PullPollingPreset[] = ['hour', 'day', 'month', 'minutes']
 
 function flattenTargetPaths(def: Record<string, unknown>): string[] {
   const paths: string[] = []
@@ -131,6 +150,32 @@ function downloadJsonFile(filename: string, jsonText: string) {
   URL.revokeObjectURL(url)
 }
 
+function createDefaultPullConfig(): PullIntegrationConfig {
+  return {
+    pollingPreset: 'hour',
+    authType: 'basic',
+    requestUri: '',
+    requestQueryParams: [],
+    pagedPollingEnabled: false,
+    pageSize: 100,
+    sinceStartDateEnabled: false,
+  }
+}
+
+function createEmptyPullRequestParamRow(): PullRequestParamRow {
+  return { id: newId(), key: '', value: '' }
+}
+
+function normalizePullPollingPreset(value: unknown): PullPollingPreset {
+  if (
+    typeof value === 'string' &&
+    PULL_POLLING_PRESETS.includes(value as PullPollingPreset)
+  ) {
+    return value as PullPollingPreset
+  }
+  return 'hour'
+}
+
 export function IntegrationDetailsPage() {
   const navigate = useNavigate()
   const { id = '' } = useParams()
@@ -143,8 +188,10 @@ export function IntegrationDetailsPage() {
   const [error, setError] = useState<string | null>(null)
   const [editingEnabled, setEditingEnabled] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const [statusUpdating, setStatusUpdating] = useState(false)
   const [clearDialogOpen, setClearDialogOpen] = useState(false)
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const canEdit = editingEnabled && !isReadOnlyView && canManageIntegrations
 
   const [number, setNumber] = useState(0)
@@ -154,6 +201,9 @@ export function IntegrationDetailsPage() {
   const [integrationKind, setIntegrationKind] = useState<IntegrationDetails['integrationKind']>('pull')
   const [endpointUrl, setEndpointUrl] = useState('')
   const [riskObjectModelId, setRiskObjectModelId] = useState('')
+  const [pullConfig, setPullConfig] = useState<PullIntegrationConfig>(createDefaultPullConfig())
+  const [pullQueryParams, setPullQueryParams] = useState<PullRequestParamRow[]>([])
+  const [showPullBasicPassword, setShowPullBasicPassword] = useState(false)
   const [status, setStatus] = useState<IntegrationDetails['status']>('active')
   const [mappingRows, setMappingRows] = useState<MappingRow[]>([{ id: newId(), from: '', to: '', applyJs: '' }])
   const [initialSnapshot, setInitialSnapshot] = useState<EditorSnapshot | null>(null)
@@ -186,18 +236,101 @@ export function IntegrationDetailsPage() {
   )
 
   const previewJson = useMemo(() => {
+    const isPullKind = integrationKind === 'pull'
+    const hasPagingEnabled = Boolean(pullConfig.pagedPollingEnabled)
+    const hasSinceStartEnabled = Boolean(pullConfig.sinceStartDateEnabled)
+    const queryParams = pullQueryParams
+      .filter((row) => row.key.trim() !== '')
+      .map((row) => ({ key: row.key.trim(), value: row.value.trim() }))
+    const normalizedPullPayload: PullIntegrationConfig | null = isPullKind
+      ? {
+          pollingPreset: pullConfig.pollingPreset ?? 'hour',
+          ...(pullConfig.pollingPreset === 'minutes'
+            ? { pollingMinutes: Math.max(1, Number(pullConfig.pollingMinutes) || 1) }
+            : {}),
+          authType: 'basic',
+          ...(pullConfig.authBasicLogin?.trim()
+            ? { authBasicLogin: pullConfig.authBasicLogin.trim() }
+            : {}),
+          ...(pullConfig.authBasicPassword?.trim()
+            ? { authBasicPassword: pullConfig.authBasicPassword.trim() }
+            : {}),
+          ...(pullConfig.requestUri?.trim() ? { requestUri: pullConfig.requestUri.trim() } : {}),
+          ...(queryParams.length > 0 ? { requestQueryParams: queryParams } : {}),
+          pagedPollingEnabled: hasPagingEnabled,
+          ...(hasPagingEnabled ? { pageSize: Math.max(1, Number(pullConfig.pageSize) || 1) } : {}),
+          sinceStartDateEnabled: hasSinceStartEnabled,
+        }
+      : null
     try {
-      return JSON.stringify({ mapping_rules: toRules(mappingRows) }, null, 2)
+      return JSON.stringify(
+        {
+          mapping_rules: toRules(mappingRows),
+          ...(normalizedPullPayload ? { pullConfig: normalizedPullPayload } : {}),
+        },
+        null,
+        2,
+      )
     } catch {
       return '{"mapping_rules":[]}'
     }
-  }, [mappingRows])
+  }, [integrationKind, mappingRows, pullConfig, pullQueryParams])
+
+  const isPullKind = integrationKind === 'pull'
+  const hasPagingEnabled = Boolean(pullConfig.pagedPollingEnabled)
+  const hasSinceStartEnabled = Boolean(pullConfig.sinceStartDateEnabled)
+
+  const normalizedPullPayload = useMemo<PullIntegrationConfig | null>(() => {
+    if (!isPullKind) return null
+    const queryParams = pullQueryParams
+      .filter((row) => row.key.trim() !== '')
+      .map((row) => ({ key: row.key.trim(), value: row.value.trim() }))
+    return {
+      pollingPreset: pullConfig.pollingPreset ?? 'hour',
+      ...(pullConfig.pollingPreset === 'minutes'
+        ? { pollingMinutes: Math.max(1, Number(pullConfig.pollingMinutes) || 1) }
+        : {}),
+      authType: 'basic',
+      ...(pullConfig.authBasicLogin?.trim()
+        ? { authBasicLogin: pullConfig.authBasicLogin.trim() }
+        : {}),
+      ...(pullConfig.authBasicPassword?.trim()
+        ? { authBasicPassword: pullConfig.authBasicPassword.trim() }
+        : {}),
+      ...(pullConfig.requestUri?.trim() ? { requestUri: pullConfig.requestUri.trim() } : {}),
+      ...(queryParams.length > 0 ? { requestQueryParams: queryParams } : {}),
+      pagedPollingEnabled: hasPagingEnabled,
+      ...(hasPagingEnabled ? { pageSize: Math.max(1, Number(pullConfig.pageSize) || 1) } : {}),
+      sinceStartDateEnabled: hasSinceStartEnabled,
+    }
+  }, [hasPagingEnabled, hasSinceStartEnabled, isPullKind, pullConfig, pullQueryParams])
+
+  const patchPullConfig = useCallback((patch: Partial<PullIntegrationConfig>) => {
+    setPullConfig((prev) => ({ ...prev, ...patch }))
+  }, [])
+
+  const patchPullQueryParam = useCallback((id: string, patch: Partial<PullRequestParamRow>) => {
+    setPullQueryParams((prev) => prev.map((row) => (row.id === id ? { ...row, ...patch } : row)))
+  }, [])
+
+  const addPullQueryParam = useCallback(() => {
+    setPullQueryParams((prev) => [...prev, createEmptyPullRequestParamRow()])
+  }, [])
+
+  const removePullQueryParam = useCallback((id: string) => {
+    setPullQueryParams((prev) => prev.filter((row) => row.id !== id))
+  }, [])
 
   const setFromSnapshot = useCallback((snapshot: EditorSnapshot) => {
     setName(snapshot.name)
     setIntegrationKind(snapshot.integrationKind)
     setEndpointUrl(snapshot.endpointUrl)
     setRiskObjectModelId(snapshot.riskObjectModelId)
+    setPullConfig({
+      ...createDefaultPullConfig(),
+      ...snapshot.pullConfig,
+    })
+    setPullQueryParams(snapshot.pullQueryParams.map((row) => ({ ...row, id: newId() })))
     setStatus(snapshot.status)
     setMappingRows(snapshot.mappingRows.map((r) => ({ ...r, id: newId() })))
   }, [])
@@ -222,6 +355,19 @@ export function IntegrationDetailsPage() {
         setIntegrationKind(details.integrationKind)
         setEndpointUrl(details.endpointUrl)
         setRiskObjectModelId(details.riskObjectModelId)
+        const nextPullConfig: PullIntegrationConfig = {
+          ...createDefaultPullConfig(),
+          ...(details.pullConfig ?? {}),
+          pollingPreset: normalizePullPollingPreset(details.pullConfig?.pollingPreset),
+          authType: 'basic',
+        }
+        setPullConfig(nextPullConfig)
+        const nextPullQueryParams = (details.pullConfig?.requestQueryParams ?? []).map((item) => ({
+          id: newId(),
+          key: item.key,
+          value: item.value,
+        }))
+        setPullQueryParams(nextPullQueryParams)
         setStatus(details.status)
         setMappingRows(rows)
         setInitialSnapshot({
@@ -229,6 +375,8 @@ export function IntegrationDetailsPage() {
           integrationKind: details.integrationKind,
           endpointUrl: details.endpointUrl,
           riskObjectModelId: details.riskObjectModelId,
+          pullConfig: nextPullConfig,
+          pullQueryParams: nextPullQueryParams,
           status: details.status,
           mappingRows: rows,
         })
@@ -316,14 +464,45 @@ export function IntegrationDetailsPage() {
       showToast({ severity: 'error', text: 'Нет сессии — войдите снова.' })
       return
     }
-    setSaving(true)
     const payload: IntegrationUpdatePayload = {
       name: name.trim() || 'Без названия',
       integrationKind,
       endpointUrl: endpointUrl.trim(),
       riskObjectModelId: riskObjectModelId.trim(),
       mapping_rules: toRules(mappingRows),
+      ...(normalizedPullPayload ? { pullConfig: normalizedPullPayload } : {}),
     }
+    if (payload.integrationKind === 'pull') {
+      if (payload.pullConfig?.pollingPreset === 'minutes' && !payload.pullConfig.pollingMinutes) {
+        showToast({
+          severity: 'error',
+          text: 'Для интервала "через N минут" укажите количество минут.',
+        })
+        return
+      }
+      if (!payload.pullConfig?.requestUri?.trim()) {
+        showToast({
+          severity: 'error',
+          text: 'Для pull-интеграции укажите URI запроса.',
+        })
+        return
+      }
+      if (payload.pullConfig?.pagedPollingEnabled && !payload.pullConfig.pageSize) {
+        showToast({
+          severity: 'error',
+          text: 'Для постраничного опроса укажите количество записей за раз.',
+        })
+        return
+      }
+      if (!payload.pullConfig?.pagedPollingEnabled && !payload.pullConfig?.sinceStartDateEnabled) {
+        showToast({
+          severity: 'error',
+          text: 'Выберите режим: постраничный опрос или после даты запуска интеграции.',
+        })
+        return
+      }
+    }
+    setSaving(true)
     try {
       const res = await putIntegrationConfigById(token, id, payload)
       setUpdatedAt(res.savedAt)
@@ -333,6 +512,8 @@ export function IntegrationDetailsPage() {
         integrationKind: payload.integrationKind,
         endpointUrl: payload.endpointUrl,
         riskObjectModelId: payload.riskObjectModelId,
+        pullConfig: payload.pullConfig ?? createDefaultPullConfig(),
+        pullQueryParams: pullQueryParams.map((row) => ({ ...row, id: newId() })),
         status,
         mappingRows,
       }
@@ -357,6 +538,8 @@ export function IntegrationDetailsPage() {
     endpointUrl,
     riskObjectModelId,
     mappingRows,
+    normalizedPullPayload,
+    pullQueryParams,
     status,
     showToast,
   ])
@@ -409,10 +592,33 @@ export function IntegrationDetailsPage() {
       endpointUrl,
       riskObjectModelId,
       mapping_rules: toRules(mappingRows),
+      ...(normalizedPullPayload ? { pullConfig: normalizedPullPayload } : {}),
     }
     downloadJsonFile(exportFilename(name), JSON.stringify(payload, null, 2))
     showToast({ severity: 'success', text: 'Экспорт выполнен.' })
-  }, [name, integrationKind, endpointUrl, riskObjectModelId, mappingRows, showToast])
+  }, [name, integrationKind, endpointUrl, riskObjectModelId, mappingRows, normalizedPullPayload, showToast])
+
+  const handleDelete = useCallback(async () => {
+    if (isReadOnlyView || !canManageIntegrations) return
+    if (!token || !id) {
+      showToast({ severity: 'error', text: 'Нет сессии — войдите снова.' })
+      return
+    }
+    setDeleting(true)
+    try {
+      await deleteIntegrationConfigById(token, id)
+      setDeleteDialogOpen(false)
+      showToast({ severity: 'success', text: 'Интеграция удалена.' })
+      navigate('/app/integration')
+    } catch (e: unknown) {
+      showToast({
+        severity: 'error',
+        text: e instanceof Error ? e.message : 'Не удалось удалить интеграцию',
+      })
+    } finally {
+      setDeleting(false)
+    }
+  }, [isReadOnlyView, canManageIntegrations, token, id, showToast, navigate])
 
   if (loading) {
     return (
@@ -462,6 +668,16 @@ export function IntegrationDetailsPage() {
           <Button size="small" variant="outlined" color="warning" startIcon={<ClearAllOutlinedIcon />} onClick={() => setClearDialogOpen(true)} disabled={!canEdit}>
             Сбросить
           </Button>
+          <Button
+            size="small"
+            variant="outlined"
+            color="error"
+            startIcon={<DeleteOutlinedIcon />}
+            onClick={() => setDeleteDialogOpen(true)}
+            disabled={isReadOnlyView || !canManageIntegrations || deleting}
+          >
+            Удалить
+          </Button>
         </Stack>
       </Box>
 
@@ -500,6 +716,29 @@ export function IntegrationDetailsPage() {
             }}
           >
             Сбросить
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>
+        <DialogTitle>Удалить интеграцию?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Интеграция будет удалена без возможности восстановления.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteDialogOpen(false)} disabled={deleting}>
+            Отмена
+          </Button>
+          <Button
+            color="error"
+            variant="contained"
+            autoFocus
+            onClick={() => void handleDelete()}
+            disabled={deleting}
+          >
+            {deleting ? 'Удаление...' : 'Удалить'}
           </Button>
         </DialogActions>
       </Dialog>
@@ -554,6 +793,195 @@ export function IntegrationDetailsPage() {
             fullWidth
             disabled={!canEdit}
           />
+
+          {isPullKind ? (
+            <Paper variant="outlined" sx={{ p: 2 }}>
+              <Stack spacing={2}>
+                <Typography variant="subtitle2">Настройки Pull-интеграции</Typography>
+
+                <FormControl fullWidth>
+                  <FormLabel sx={{ mb: 0.75, display: 'block' }}>Интервал опроса</FormLabel>
+                  <Select
+                    value={pullConfig.pollingPreset ?? 'hour'}
+                    onChange={(e) =>
+                      patchPullConfig({
+                        pollingPreset: e.target.value as PullPollingPreset,
+                      })
+                    }
+                    disabled={!canEdit}
+                  >
+                    <MenuItem value="hour">Каждый час</MenuItem>
+                    <MenuItem value="day">Каждый день</MenuItem>
+                    <MenuItem value="month">Каждый месяц</MenuItem>
+                    <MenuItem value="minutes">Через N минут</MenuItem>
+                  </Select>
+                </FormControl>
+
+                {pullConfig.pollingPreset === 'minutes' ? (
+                  <TextField
+                    label="Количество минут"
+                    type="number"
+                    value={pullConfig.pollingMinutes ?? ''}
+                    onChange={(e) =>
+                      patchPullConfig({
+                        pollingMinutes:
+                          e.target.value === ''
+                            ? undefined
+                            : Math.max(1, Number.parseInt(e.target.value, 10) || 1),
+                      })
+                    }
+                    inputProps={{ min: 1, step: 1 }}
+                    fullWidth
+                    disabled={!canEdit}
+                  />
+                ) : null}
+
+                <FormControl fullWidth>
+                  <FormLabel sx={{ mb: 0.75, display: 'block' }}>Вид авторизации</FormLabel>
+                  <Select value="basic" disabled>
+                    <MenuItem value="basic">Basic Authentication</MenuItem>
+                  </Select>
+                </FormControl>
+
+                <TextField
+                  label="Логин Basic Authentication"
+                  value={pullConfig.authBasicLogin ?? ''}
+                  onChange={(e) => patchPullConfig({ authBasicLogin: e.target.value })}
+                  fullWidth
+                  autoComplete="off"
+                  disabled={!canEdit}
+                />
+
+                <TextField
+                  label="Пароль Basic Authentication"
+                  value={pullConfig.authBasicPassword ?? ''}
+                  onChange={(e) => patchPullConfig({ authBasicPassword: e.target.value })}
+                  fullWidth
+                  type={showPullBasicPassword ? 'text' : 'password'}
+                  autoComplete="new-password"
+                  disabled={!canEdit}
+                  slotProps={{
+                    input: {
+                      endAdornment: (
+                        <InputAdornment position="end">
+                          <IconButton
+                            aria-label={
+                              showPullBasicPassword ? 'Скрыть пароль' : 'Показать пароль'
+                            }
+                            onClick={() => setShowPullBasicPassword((prev) => !prev)}
+                            onMouseDown={(event) => event.preventDefault()}
+                            edge="end"
+                            disabled={!canEdit}
+                          >
+                            {showPullBasicPassword ? <VisibilityOffIcon /> : <VisibilityIcon />}
+                          </IconButton>
+                        </InputAdornment>
+                      ),
+                    },
+                  }}
+                />
+
+                <TextField
+                  label="URI запроса"
+                  value={pullConfig.requestUri ?? ''}
+                  onChange={(e) => patchPullConfig({ requestUri: e.target.value })}
+                  fullWidth
+                  placeholder="/api/v1/entities"
+                  autoComplete="off"
+                  disabled={!canEdit}
+                />
+
+                <Box>
+                  <Typography variant="body2" sx={{ mb: 1 }}>
+                    Параметры запроса
+                  </Typography>
+                  <Stack spacing={1}>
+                    {pullQueryParams.map((row, index) => (
+                      <Stack key={row.id} direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+                        <TextField
+                          label={`Параметр ${index + 1}`}
+                          value={row.key}
+                          onChange={(e) =>
+                            patchPullQueryParam(row.id, {
+                              key: e.target.value,
+                            })
+                          }
+                          size="small"
+                          fullWidth
+                          autoComplete="off"
+                          disabled={!canEdit}
+                        />
+                        <TextField
+                          label="Значение"
+                          value={row.value}
+                          onChange={(e) =>
+                            patchPullQueryParam(row.id, {
+                              value: e.target.value,
+                            })
+                          }
+                          size="small"
+                          fullWidth
+                          autoComplete="off"
+                          disabled={!canEdit}
+                        />
+                        <IconButton
+                          aria-label="Удалить параметр"
+                          onClick={() => removePullQueryParam(row.id)}
+                          disabled={!canEdit}
+                        >
+                          <DeleteOutlinedIcon fontSize="small" />
+                        </IconButton>
+                      </Stack>
+                    ))}
+                  </Stack>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    sx={{ mt: 1.5 }}
+                    startIcon={<AddIcon />}
+                    onClick={addPullQueryParam}
+                    disabled={!canEdit}
+                  >
+                    Добавить параметр
+                  </Button>
+                </Box>
+
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={hasPagingEnabled}
+                      onChange={(e) => {
+                        const checked = e.target.checked
+                        patchPullConfig({
+                          pagedPollingEnabled: checked,
+                          sinceStartDateEnabled: checked ? false : hasSinceStartEnabled,
+                        })
+                      }}
+                      disabled={!canEdit}
+                    />
+                  }
+                  label="Постраничный опрос"
+                />
+
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={hasSinceStartEnabled}
+                      onChange={(e) => {
+                        const checked = e.target.checked
+                        patchPullConfig({
+                          sinceStartDateEnabled: checked,
+                          pagedPollingEnabled: checked ? false : hasPagingEnabled,
+                        })
+                      }}
+                      disabled={!canEdit}
+                    />
+                  }
+                  label="После даты запуска интеграции"
+                />
+              </Stack>
+            </Paper>
+          ) : null}
 
           <FormControlLabel
             control={

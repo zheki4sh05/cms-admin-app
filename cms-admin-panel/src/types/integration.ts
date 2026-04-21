@@ -34,6 +34,28 @@ export type IntegrationMappingRule = {
   transform?: string
 }
 
+export type PullPollingPreset = 'hour' | 'day' | 'month' | 'minutes'
+
+export type PullRequestQueryParam = {
+  key: string
+  value: string
+}
+
+export type PullIntegrationConfig = {
+  pollingPreset: PullPollingPreset
+  pollingMinutes?: number
+  authType: 'basic'
+  authBasicLogin?: string
+  authBasicPassword?: string
+  requestUri?: string
+  requestQueryParams?: PullRequestQueryParam[]
+  pagedPollingEnabled?: boolean
+  pagingOffsetParamKey?: string
+  pagingLimitParamKey?: string
+  pageSize?: number
+  sinceStartDateEnabled?: boolean
+}
+
 export type IntegrationDetails = {
   id: string
   number: number
@@ -42,6 +64,7 @@ export type IntegrationDetails = {
   endpointUrl: string
   riskObjectModelId: string
   mapping_rules: IntegrationMappingRule[]
+  pullConfig?: PullIntegrationConfig
   status: IntegrationConfigStatus
   authorName: string
   updatedAt: string
@@ -53,11 +76,17 @@ export type IntegrationUpdatePayload = {
   endpointUrl: string
   riskObjectModelId: string
   mapping_rules: IntegrationMappingRule[]
+  pullConfig?: PullIntegrationConfig
 }
 
 export type IntegrationUpdateResponse = {
   id: string
   savedAt: string
+}
+
+export type IntegrationDeleteResponse = {
+  id: string
+  deletedAt: string
 }
 
 export type IntegrationStatusUpdatePayload = {

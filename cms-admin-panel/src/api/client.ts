@@ -3,7 +3,10 @@ import type {
   IntegrationChangeHistoryPage,
   IntegrationConfig,
   IntegrationConfigListPage,
+  IntegrationDeleteResponse,
   IntegrationDetails,
+  PullIntegrationConfig,
+  PullRequestQueryParam,
   IntegrationStatusUpdatePayload,
   IntegrationUpdatePayload,
   IntegrationUpdateResponse,
@@ -179,6 +182,55 @@ function normalizeIntegrationMappingRules(value: unknown): IntegrationDetails['m
     })
   }
   return normalized
+}
+
+function normalizePullRequestQueryParams(value: unknown): PullRequestQueryParam[] | null {
+  if (!Array.isArray(value)) return null
+  const normalized: PullRequestQueryParam[] = []
+  for (const item of value) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue
+    const row = item as Record<string, unknown>
+    if (typeof row.key !== 'string' || typeof row.value !== 'string') continue
+    normalized.push({ key: row.key, value: row.value })
+  }
+  return normalized
+}
+
+function normalizePullConfig(value: unknown): PullIntegrationConfig | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const raw = value as Record<string, unknown>
+  const pollingPreset =
+    raw.pollingPreset === 'hour' ||
+    raw.pollingPreset === 'day' ||
+    raw.pollingPreset === 'month' ||
+    raw.pollingPreset === 'minutes'
+      ? raw.pollingPreset
+      : null
+  if (!pollingPreset) return null
+  if (raw.authType !== 'basic') return null
+  const queryParams = normalizePullRequestQueryParams(raw.requestQueryParams)
+  return {
+    pollingPreset,
+    ...(typeof raw.pollingMinutes === 'number' && Number.isFinite(raw.pollingMinutes)
+      ? { pollingMinutes: Math.max(1, Math.floor(raw.pollingMinutes)) }
+      : {}),
+    authType: 'basic',
+    ...(typeof raw.authBasicLogin === 'string' ? { authBasicLogin: raw.authBasicLogin } : {}),
+    ...(typeof raw.authBasicPassword === 'string'
+      ? { authBasicPassword: raw.authBasicPassword }
+      : {}),
+    ...(typeof raw.requestUri === 'string' ? { requestUri: raw.requestUri } : {}),
+    ...(queryParams ? { requestQueryParams: queryParams } : {}),
+    ...(typeof raw.pagedPollingEnabled === 'boolean'
+      ? { pagedPollingEnabled: raw.pagedPollingEnabled }
+      : {}),
+    ...(typeof raw.pageSize === 'number' && Number.isFinite(raw.pageSize)
+      ? { pageSize: Math.max(1, Math.floor(raw.pageSize)) }
+      : {}),
+    ...(typeof raw.sinceStartDateEnabled === 'boolean'
+      ? { sinceStartDateEnabled: raw.sinceStartDateEnabled }
+      : {}),
+  }
 }
 
 export async function postLogin(email: string, password: string) {
@@ -454,6 +506,7 @@ export async function getIntegrationConfigById(
   const number = normalizeIntegrationNumber(data.number)
   const integrationKind = normalizeIntegrationKind(data.integrationKind)
   const mappingRules = normalizeIntegrationMappingRules(data.mapping_rules)
+  const pullConfig = normalizePullConfig(data.pullConfig)
   const status = normalizeIntegrationStatus(data.status)
   if (
     typeof data.id !== 'string' ||
@@ -477,6 +530,7 @@ export async function getIntegrationConfigById(
     endpointUrl: data.endpointUrl,
     riskObjectModelId: data.riskObjectModelId,
     mapping_rules: mappingRules,
+    ...(pullConfig ? { pullConfig } : {}),
     status,
     authorName: data.authorName,
     updatedAt: data.updatedAt,
@@ -552,6 +606,30 @@ export async function putIntegrationConfigStatusById(
     throw new Error('Некорректный ответ сервера')
   }
   return { id: data.id, savedAt: data.savedAt }
+}
+
+export async function deleteIntegrationConfigById(
+  token: string,
+  id: string,
+  companyId?: string | null,
+): Promise<IntegrationDeleteResponse> {
+  const effectiveCompanyId = requireCompanyId(companyId)
+  const res = await fetch(apiUrl(`integration-configs/${id}`), {
+    method: 'DELETE',
+    headers: authHeaders(token, effectiveCompanyId),
+  })
+  const data = (await res.json().catch(() => ({}))) as {
+    message?: string
+    id?: string
+    deletedAt?: string
+  }
+  if (!res.ok) {
+    throw new Error(data.message ?? 'Не удалось удалить интеграцию')
+  }
+  if (!data.id || !data.deletedAt) {
+    throw new Error('Некорректный ответ сервера')
+  }
+  return { id: data.id, deletedAt: data.deletedAt }
 }
 
 export async function getUsersList(token: string, companyId?: string | null) {

@@ -270,6 +270,15 @@ let mockIntegrationConfigDetails = [
       { from: 'Ref_Key', to: 'external_id' },
       { from: 'Date', to: 'timestamp', transform: 'date_to_iso' },
     ],
+    pullConfig: {
+      pollingPreset: 'hour',
+      authType: 'basic',
+      requestUri: '/api/exchange',
+      requestQueryParams: [{ key: 'updatedOnly', value: 'true' }],
+      pagedPollingEnabled: true,
+      pageSize: 200,
+      sinceStartDateEnabled: false,
+    },
     status: 'active' as const,
     authorName: 'Алексей Иванов',
     updatedAt: '2026-04-11T14:32:00.000Z',
@@ -309,6 +318,14 @@ let mockIntegrationConfigDetails = [
     endpointUrl: 'sftp://reports.example.local/export',
     riskObjectModelId: 'rom-4',
     mapping_rules: [{ from: 'group_id', to: 'group_id' }],
+    pullConfig: {
+      pollingPreset: 'day',
+      authType: 'basic',
+      requestUri: '/export',
+      requestQueryParams: [],
+      pagedPollingEnabled: false,
+      sinceStartDateEnabled: true,
+    },
     status: 'inactive' as const,
     authorName: 'Иван Сидоров',
     updatedAt: '2026-04-02T11:45:00.000Z',
@@ -743,6 +760,54 @@ function isRiskCategory(categoryId: string): categoryId is 'financial' | 'reputa
   return categoryId === 'financial' || categoryId === 'reputational' || categoryId === 'operational'
 }
 
+function normalizePullQueryParams(value: unknown): Array<{ key: string; value: string }> | null {
+  if (!Array.isArray(value)) return null
+  const rows: Array<{ key: string; value: string }> = []
+  for (const item of value) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue
+    const row = item as Record<string, unknown>
+    if (typeof row.key !== 'string' || typeof row.value !== 'string') continue
+    rows.push({ key: row.key, value: row.value })
+  }
+  return rows
+}
+
+function normalizePullConfig(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const raw = value as Record<string, unknown>
+  const pollingPreset =
+    raw.pollingPreset === 'hour' ||
+    raw.pollingPreset === 'day' ||
+    raw.pollingPreset === 'month' ||
+    raw.pollingPreset === 'minutes'
+      ? raw.pollingPreset
+      : null
+  if (!pollingPreset || raw.authType !== 'basic') return null
+  const requestQueryParams = normalizePullQueryParams(raw.requestQueryParams)
+  return {
+    pollingPreset,
+    ...(typeof raw.pollingMinutes === 'number' && Number.isFinite(raw.pollingMinutes)
+      ? { pollingMinutes: Math.max(1, Math.floor(raw.pollingMinutes)) }
+      : {}),
+    authType: 'basic',
+    ...(typeof raw.authBasicLogin === 'string' ? { authBasicLogin: raw.authBasicLogin } : {}),
+    ...(typeof raw.authBasicPassword === 'string'
+      ? { authBasicPassword: raw.authBasicPassword }
+      : {}),
+    ...(typeof raw.requestUri === 'string' ? { requestUri: raw.requestUri } : {}),
+    ...(requestQueryParams ? { requestQueryParams } : {}),
+    ...(typeof raw.pagedPollingEnabled === 'boolean'
+      ? { pagedPollingEnabled: raw.pagedPollingEnabled }
+      : {}),
+    ...(typeof raw.pageSize === 'number' && Number.isFinite(raw.pageSize)
+      ? { pageSize: Math.max(1, Math.floor(raw.pageSize)) }
+      : {}),
+    ...(typeof raw.sinceStartDateEnabled === 'boolean'
+      ? { sinceStartDateEnabled: raw.sinceStartDateEnabled }
+      : {}),
+  }
+}
+
 export const handlers = [
   http.post('/api/auth/admin/login', async ({ request }) => {
     await delay(450)
@@ -979,6 +1044,7 @@ export const handlers = [
       return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
     }
     const body = (await request.json().catch(() => ({}))) as Record<string, unknown>
+    const normalizedPullConfig = normalizePullConfig(body.pullConfig)
     if (
       typeof body.name !== 'string' ||
       !body.name.trim() ||
@@ -992,6 +1058,12 @@ export const handlers = [
     ) {
       return HttpResponse.json(
         { message: 'Некорректные данные для создания интеграции' },
+        { status: 400 },
+      )
+    }
+    if (body.integrationKind === 'pull' && !normalizedPullConfig) {
+      return HttpResponse.json(
+        { message: 'Для pull-интеграции требуется корректный pullConfig' },
         { status: 400 },
       )
     }
@@ -1020,6 +1092,7 @@ export const handlers = [
         endpointUrl: body.endpointUrl.trim(),
         riskObjectModelId: body.riskObjectModelId.trim(),
         mapping_rules: mappingRules,
+        ...(normalizedPullConfig ? { pullConfig: normalizedPullConfig } : {}),
         status,
         authorName: adminUser.name,
         updatedAt,
@@ -1101,17 +1174,31 @@ export const handlers = [
       return HttpResponse.json({ message: 'Интеграция не найдена' }, { status: 404 })
     }
     const body = (await request.json().catch(() => ({}))) as Record<string, unknown>
+    const normalizedPullConfig = normalizePullConfig(body.pullConfig)
     const updatedAt = new Date().toISOString()
     const prev = mockIntegrationConfigDetails[idx]
+    const nextIntegrationKind =
+      body.integrationKind === 'pull' ||
+      body.integrationKind === 'push' ||
+      body.integrationKind === 'broker'
+        ? body.integrationKind
+        : prev.integrationKind
+    if (nextIntegrationKind === 'pull' && body.pullConfig !== undefined && !normalizedPullConfig) {
+      return HttpResponse.json(
+        { message: 'Для pull-интеграции требуется корректный pullConfig' },
+        { status: 400 },
+      )
+    }
+    if (nextIntegrationKind === 'pull' && !normalizedPullConfig && !prev.pullConfig) {
+      return HttpResponse.json(
+        { message: 'Для pull-интеграции требуется pullConfig' },
+        { status: 400 },
+      )
+    }
     const next = {
       ...prev,
       name: typeof body.name === 'string' && body.name.trim() ? body.name.trim() : prev.name,
-      integrationKind:
-        body.integrationKind === 'pull' ||
-        body.integrationKind === 'push' ||
-        body.integrationKind === 'broker'
-          ? body.integrationKind
-          : prev.integrationKind,
+      integrationKind: nextIntegrationKind,
       endpointUrl:
         typeof body.endpointUrl === 'string' && body.endpointUrl.trim()
           ? body.endpointUrl.trim()
@@ -1123,6 +1210,9 @@ export const handlers = [
       mapping_rules: Array.isArray(body.mapping_rules)
         ? body.mapping_rules
         : prev.mapping_rules,
+      ...(body.pullConfig !== undefined
+        ? { pullConfig: normalizedPullConfig ?? prev.pullConfig }
+        : {}),
       status: prev.status,
       authorName: adminUser.name,
       updatedAt,
@@ -1171,6 +1261,29 @@ export const handlers = [
         : it,
     )
     return HttpResponse.json({ id, savedAt: updatedAt })
+  }),
+
+  http.delete('/api/integration-configs/:id', async ({ request, params }) => {
+    await delay(220)
+    const token = parseAuth(request)
+    if (token !== MOCK_TOKEN) {
+      return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
+    }
+    const companyId = request.headers.get('CompanyId')?.trim()
+    const id = String(params.id ?? '').trim()
+    if (!companyId || !id || !id.startsWith('ic-')) {
+      return HttpResponse.json(
+        { message: 'Некорректный id или CompanyId' },
+        { status: 400 },
+      )
+    }
+    const detailsExists = mockIntegrationConfigDetails.some((it) => it.id === id)
+    if (!detailsExists) {
+      return HttpResponse.json({ message: 'Интеграция не найдена' }, { status: 404 })
+    }
+    mockIntegrationConfigDetails = mockIntegrationConfigDetails.filter((it) => it.id !== id)
+    mockIntegrationConfigs = mockIntegrationConfigs.filter((it) => it.id !== id)
+    return HttpResponse.json({ id, deletedAt: new Date().toISOString() })
   }),
 
   http.get('/api/risk-object-models', async ({ request }) => {
