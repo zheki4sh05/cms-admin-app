@@ -36,6 +36,20 @@ export type RuleCreatePayload = {
   mechanismScriptContent?: string
 }
 
+export type RuleUpdatePayload = {
+  description: string
+  name: string
+  condition: string
+  categoryId: string
+  riskObjectId: string
+  priority: 'low' | 'medium' | 'high'
+  responsibleUserId: string
+  actions: Array<'createIncident' | 'sendNotification'>
+  enabled: boolean
+  mechanismScriptName: string
+  mechanismScriptContent: string
+}
+
 export type RuleCreateResponse = {
   id: string
   savedAt: string
@@ -53,4 +67,21 @@ export type RuleChangeHistoryEntry = {
 export type RuleChangeHistoryPage = {
   items: RuleChangeHistoryEntry[]
   hasMore: boolean
+}
+
+export type RuleChangeHistoryDetails = RuleChangeHistoryEntry & {
+  companyId: string
+  ruleId: string
+  authorId: string
+  condition: string
+  categoryId: string
+  riskObjectId: string
+  priority: string
+  responsibleUserId: string
+  actions: string[]
+  enabled: boolean
+  mechanismScriptName: string
+  mechanismScriptContent: string
+  createdByUserId: string
+  savedAt: string
 }

@@ -1329,11 +1329,12 @@ export const handlers = [
       return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
     }
     const body = (await request.json().catch(() => ({}))) as Record<string, unknown>
+    const description = typeof body.description === 'string' ? body.description.trim() : ''
     const name = typeof body.name === 'string' ? body.name.trim() : ''
     const condition = typeof body.condition === 'string' ? body.condition.trim() : ''
     const categoryId = typeof body.categoryId === 'string' ? body.categoryId.trim() : ''
     const riskObjectId = typeof body.riskObjectId === 'string' ? body.riskObjectId.trim() : ''
-    if (!name || !condition || !categoryId) {
+    if (!description || !name || !condition || !categoryId) {
       return HttpResponse.json({ message: 'Заполните обязательные поля правила' }, { status: 400 })
     }
     const categoryExists = mockRiskCategories.some((item) => item.id === categoryId)
@@ -1389,6 +1390,48 @@ export const handlers = [
     return HttpResponse.json({ id, savedAt: new Date().toISOString() }, { status: 201 })
   }),
 
+  http.put('/api/rules/:id', async ({ request, params }) => {
+    await delay(260)
+    const token = parseAuth(request)
+    if (token !== MOCK_TOKEN) {
+      return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
+    }
+    const id = String(params.id ?? '')
+    const riskIndex = mockRisks.findIndex((item) => item.id === id)
+    if (riskIndex < 0) {
+      return HttpResponse.json({ message: 'Правило не найдено' }, { status: 404 })
+    }
+    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>
+    const name = typeof body.name === 'string' ? body.name.trim() : ''
+    const condition = typeof body.condition === 'string' ? body.condition.trim() : ''
+    const categoryId = typeof body.categoryId === 'string' ? body.categoryId.trim() : ''
+    const riskObjectId = typeof body.riskObjectId === 'string' ? body.riskObjectId.trim() : ''
+    if (!name || !condition || !categoryId) {
+      return HttpResponse.json({ message: 'Заполните обязательные поля правила' }, { status: 400 })
+    }
+    const categoryExists = mockRiskCategories.some((item) => item.id === categoryId)
+    if (!categoryExists) {
+      return HttpResponse.json({ message: 'Категория риска не найдена' }, { status: 404 })
+    }
+    if (riskObjectId) {
+      const riskObjectExists = mockRiskObjects.some((item) => item.id === riskObjectId)
+      if (!riskObjectExists) {
+        return HttpResponse.json({ message: 'Рисковый объект не найден' }, { status: 404 })
+      }
+    }
+    const fallbackCategory: 'financial' | 'reputational' | 'operational' = isRiskCategory(categoryId)
+      ? categoryId
+      : 'operational'
+    mockRisks[riskIndex] = {
+      ...mockRisks[riskIndex],
+      name,
+      description: condition,
+      category: fallbackCategory,
+      riskObjectId,
+    }
+    return HttpResponse.json({ id, savedAt: new Date().toISOString() })
+  }),
+
   http.get('/api/rules/change-history', async ({ request }) => {
     await delay(260)
     const token = parseAuth(request)
@@ -1415,6 +1458,80 @@ export const handlers = [
     const items = pool.slice(start, start + pageSize)
     const hasMore = start + items.length < pool.length
     return HttpResponse.json({ items, hasMore })
+  }),
+
+  http.get('/api/rules/change-history/:id', async ({ request, params }) => {
+    await delay(240)
+    const token = parseAuth(request)
+    if (token !== MOCK_TOKEN) {
+      return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
+    }
+    const id = String(params.id ?? '')
+    const historyItem = mockRuleChangeHistory.find((item) => item.id === id)
+    if (!historyItem) {
+      return HttpResponse.json({ message: 'Запись истории не найдена' }, { status: 404 })
+    }
+    const rule = historyItem.ruleId ? mockRisks.find((r) => r.id === historyItem.ruleId) : undefined
+    const override = historyItem.ruleId ? mockRuleOverrides[historyItem.ruleId] ?? {} : {}
+    const categoryId = override.categoryId ?? rule?.category ?? 'financial'
+    const priority = override.priority ?? 'medium'
+    const riskObjectId = override.riskObjectId ?? rule?.riskObjectId ?? ''
+    return HttpResponse.json({
+      id: historyItem.id,
+      companyId: 'company-1',
+      ruleId: historyItem.ruleId ?? '',
+      ruleName: historyItem.ruleName,
+      description: historyItem.description,
+      authorId: mockUsers[0]?.id ?? '',
+      authorName: historyItem.authorName,
+      condition: rule?.description ?? '',
+      categoryId,
+      riskObjectId,
+      priority,
+      responsibleUserId: override.responsibleUserId ?? '',
+      actions: override.actions ?? [],
+      enabled: typeof override.enabled === 'boolean' ? override.enabled : true,
+      mechanismScriptName: override.mechanismScriptName ?? '',
+      mechanismScriptContent: override.mechanismScriptContent ?? '',
+      createdByUserId: mockUsers[0]?.id ?? '',
+      savedAt: new Date().toISOString(),
+      changedAt: historyItem.changedAt,
+    })
+  }),
+
+  http.get('/api/rules/:id', async ({ request, params }) => {
+    await delay(240)
+    const token = parseAuth(request)
+    if (token !== MOCK_TOKEN) {
+      return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
+    }
+    const id = String(params.id ?? '')
+    const riskIndex = mockRisks.findIndex((item) => item.id === id)
+    if (riskIndex < 0) {
+      return HttpResponse.json({ message: 'Правило не найдено' }, { status: 404 })
+    }
+    const risk = mockRisks[riskIndex]
+    const override = mockRuleOverrides[id] ?? {}
+    const categoryId = override.categoryId ?? risk.category
+    const priority = override.priority ?? rulePriorityPattern[riskIndex % rulePriorityPattern.length]
+    const enabled = override.enabled ?? riskIndex % 5 !== 4
+    const riskObjectId = override.riskObjectId ?? risk.riskObjectId
+    return HttpResponse.json({
+      id: risk.id,
+      companyId: 'company-1',
+      name: risk.name,
+      condition: risk.description,
+      categoryId,
+      riskObjectId,
+      priority,
+      responsibleUserId: override.responsibleUserId ?? '',
+      actions: override.actions ?? [],
+      enabled,
+      mechanismScriptName: override.mechanismScriptName ?? '',
+      mechanismScriptContent: override.mechanismScriptContent ?? '',
+      createdByUserId: mockUsers[0]?.id ?? '',
+      savedAt: new Date().toISOString(),
+    })
   }),
 
   http.post('/api/risk-objects', async ({ request }) => {

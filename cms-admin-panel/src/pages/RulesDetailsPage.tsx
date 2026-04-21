@@ -25,25 +25,23 @@ import {
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
+  getRuleById,
   getRiskCategories,
   getRiskObjectById,
   getRuleRiskObjects,
-  getRisks,
-  getRuleOverrides,
   getUsersList,
-  putRuleOverrideById,
+  putRuleById,
   type RuleRiskObjectOption,
 } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
+import type { RuleUpdatePayload } from '../types/risks'
 import type { RiskObjectDetails } from '../types/riskObjects'
 import {
   actionLabels,
-  buildRuleRows,
   priorityLabels,
   type RiskCategoryOption,
   type RuleAction,
   type RuleEditorDraft,
-  type RuleOverrides,
   type RuleTableRow,
 } from './rulesShared'
 
@@ -52,6 +50,8 @@ type UserOption = {
   name: string
   email: string
 }
+
+type EditableRuleState = Omit<RuleUpdatePayload, 'description'>
 
 function normalizeUsers(items: unknown[]): UserOption[] {
   return items
@@ -89,46 +89,69 @@ export function RulesDetailsPage() {
   const [riskObjectPreview, setRiskObjectPreview] = useState<RiskObjectDetails | null>(null)
   const [categories, setCategories] = useState<RiskCategoryOption[]>([])
   const [users, setUsers] = useState<UserOption[]>([])
+  const [ruleName, setRuleName] = useState('')
+  const [ruleCondition, setRuleCondition] = useState('')
   const [draft, setDraft] = useState<RuleEditorDraft | null>(null)
+  const [originalRule, setOriginalRule] = useState<EditableRuleState | null>(null)
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false)
+  const [saveComment, setSaveComment] = useState('')
+  const [saveCommentError, setSaveCommentError] = useState<string | null>(null)
+  const [pendingChanges, setPendingChanges] = useState<string[]>([])
   const canEdit = editingEnabled && canManageRulesAndRisks
 
   useEffect(() => {
     if (!token || !id) return
     let cancelled = false
     Promise.all([
-      getRisks(token, user?.companyId),
+      getRuleById(token, id, user?.companyId),
       getRuleRiskObjects(token, user?.companyId),
       getUsersList(token, user?.companyId),
       getRiskCategories(token, user?.companyId),
-      getRuleOverrides(token, user?.companyId),
     ])
-      .then(([risks, riskObjectItems, usersRaw, categoryItems, overrides]) => {
+      .then(([rule, riskObjectItems, usersRaw, categoryItems]) => {
         if (cancelled) return
-        const rows = buildRuleRows(risks, overrides, categoryItems)
-        const row = rows.find((item) => item.id === id)
-        if (!row) {
-          setError('Правило не найдено')
-          return
+        const row: RuleTableRow = {
+          id: rule.id,
+          name: rule.name,
+          condition: rule.condition,
+          action: '',
+          categoryId: rule.categoryId,
+          categoryLabel: rule.categoryId,
+          priority: rule.priority,
+          enabled: rule.enabled,
+          riskObjectId: rule.riskObjectId,
         }
-        const persisted = overrides[id] as RuleOverrides | undefined
-        const persistedRiskObjectId = persisted?.riskObjectId ?? row.riskObjectId
         const selectedRiskObject =
           riskObjectItems.find(
-            (item) => item.uuid === persistedRiskObjectId || item.id === persistedRiskObjectId,
+            (item) => item.uuid === rule.riskObjectId || item.id === rule.riskObjectId,
           ) ?? null
         setRuleRow(row)
+        setRuleName(rule.name)
+        setRuleCondition(rule.condition)
         setRiskObjects(riskObjectItems)
         setCategories(categoryItems)
         setUsers(normalizeUsers(usersRaw))
         setDraft({
-          riskObjectId: selectedRiskObject?.uuid ?? persistedRiskObjectId,
-          mechanismScriptName: persisted?.mechanismScriptName ?? '',
-          mechanismScriptContent: persisted?.mechanismScriptContent ?? '',
-          categoryId: persisted?.categoryId ?? row.categoryId,
-          priority: persisted?.priority ?? row.priority,
-          responsibleUserId: persisted?.responsibleUserId ?? '',
-          actions: persisted?.actions ?? ['createIncident'],
-          enabled: persisted?.enabled ?? row.enabled,
+          riskObjectId: selectedRiskObject?.uuid ?? rule.riskObjectId,
+          mechanismScriptName: rule.mechanismScriptName ?? '',
+          mechanismScriptContent: rule.mechanismScriptContent ?? '',
+          categoryId: rule.categoryId,
+          priority: rule.priority,
+          responsibleUserId: rule.responsibleUserId ?? '',
+          actions: rule.actions && rule.actions.length > 0 ? rule.actions : ['createIncident'],
+          enabled: rule.enabled,
+        })
+        setOriginalRule({
+          name: rule.name,
+          condition: rule.condition,
+          categoryId: rule.categoryId,
+          riskObjectId: selectedRiskObject?.uuid ?? rule.riskObjectId,
+          priority: rule.priority,
+          responsibleUserId: rule.responsibleUserId ?? '',
+          actions: rule.actions && rule.actions.length > 0 ? rule.actions : ['createIncident'],
+          enabled: rule.enabled,
+          mechanismScriptName: rule.mechanismScriptName ?? '',
+          mechanismScriptContent: rule.mechanismScriptContent ?? '',
         })
         setError(null)
       })
@@ -149,10 +172,6 @@ export function RulesDetailsPage() {
     draft && draft.responsibleUserId
       ? users.find((user) => user.id === draft.responsibleUserId) ?? null
       : null
-
-  const conditionText = useMemo(() => {
-    return ruleRow?.condition ?? ''
-  }, [ruleRow])
 
   async function handleOpenRiskObjectPreview() {
     if (!token || !draft?.riskObjectId) return
@@ -183,19 +202,117 @@ export function RulesDetailsPage() {
     }
   }, [riskObjectPreview])
 
-  async function handleSave() {
+  function buildEditableRuleState(currentDraft: RuleEditorDraft): EditableRuleState {
+    return {
+      name: ruleName.trim(),
+      condition: ruleCondition.trim(),
+      categoryId: currentDraft.categoryId,
+      riskObjectId: currentDraft.riskObjectId,
+      priority: currentDraft.priority,
+      responsibleUserId: currentDraft.responsibleUserId,
+      actions: currentDraft.actions,
+      enabled: currentDraft.enabled,
+      mechanismScriptName: currentDraft.mechanismScriptName,
+      mechanismScriptContent: currentDraft.mechanismScriptContent,
+    }
+  }
+
+  function getPendingChanges(next: EditableRuleState): string[] {
+    if (!originalRule) return []
+    const changes: string[] = []
+    if (originalRule.name !== next.name) changes.push(`Название: "${originalRule.name}" -> "${next.name}"`)
+    if (originalRule.condition !== next.condition) changes.push('Изменено условие срабатывания')
+    if (originalRule.categoryId !== next.categoryId) {
+      changes.push(`Категория: ${originalRule.categoryId} -> ${next.categoryId}`)
+    }
+    if (originalRule.riskObjectId !== next.riskObjectId) {
+      changes.push(
+        `Рисковый объект: ${originalRule.riskObjectId || 'не привязан'} -> ${next.riskObjectId || 'не привязан'}`,
+      )
+    }
+    if (originalRule.priority !== next.priority) {
+      changes.push(`Приоритет: ${priorityLabels[originalRule.priority]} -> ${priorityLabels[next.priority]}`)
+    }
+    if (originalRule.responsibleUserId !== next.responsibleUserId) changes.push('Изменен ответственный')
+    if (originalRule.enabled !== next.enabled) {
+      changes.push(`Статус: ${originalRule.enabled ? 'включено' : 'выключено'} -> ${next.enabled ? 'включено' : 'выключено'}`)
+    }
+    if (originalRule.mechanismScriptName !== next.mechanismScriptName) {
+      changes.push('Изменен файл скрипта')
+    }
+    if (originalRule.mechanismScriptContent !== next.mechanismScriptContent) {
+      changes.push('Изменено содержимое скрипта')
+    }
+    const originalActions = originalRule.actions.join(',')
+    const nextActions = next.actions.join(',')
+    if (originalActions !== nextActions) {
+      changes.push('Изменены действия при срабатывании')
+    }
+    return changes
+  }
+
+  function handleOpenSaveDialog() {
     if (!canManageRulesAndRisks) return
-    if (!token) return
-    if (!id || !draft) return
+    if (!id || !draft || !originalRule) return
     if (scriptFileLoading) {
       setError('Дождитесь загрузки содержимого файла скрипта')
       return
     }
+    const normalizedName = ruleName.trim()
+    const normalizedCondition = ruleCondition.trim()
+    if (!normalizedName || !normalizedCondition) {
+      setError('Заполните название и условие срабатывания')
+      return
+    }
+    const nextState = buildEditableRuleState(draft)
+    const changes = getPendingChanges(nextState)
+    if (changes.length === 0) {
+      setSaveInfo('Изменений для сохранения нет')
+      return
+    }
+    setPendingChanges(changes)
+    setSaveComment('')
+    setSaveCommentError(null)
+    setSaveDialogOpen(true)
+  }
+
+  async function handleSave() {
+    if (!token) return
+    if (!id || !draft || !originalRule) return
+    const comment = saveComment.trim()
+    if (!comment) {
+      setSaveCommentError('Добавьте комментарий изменений')
+      return
+    }
+    const nextState = buildEditableRuleState(draft)
     setSaveLoading(true)
     try {
-      await putRuleOverrideById(token, id, draft, user?.companyId)
+      await putRuleById(
+        token,
+        id,
+        {
+          description: comment,
+          ...nextState,
+        },
+        user?.companyId,
+      )
+      setRuleRow((prev) =>
+        prev
+          ? {
+              ...prev,
+              name: nextState.name,
+              condition: nextState.condition,
+              categoryId: nextState.categoryId,
+              priority: nextState.priority,
+              enabled: nextState.enabled,
+              riskObjectId: nextState.riskObjectId,
+            }
+          : prev,
+      )
+      setOriginalRule(nextState)
       setSaveInfo('Правило сохранено')
       setEditingEnabled(false)
+      setSaveDialogOpen(false)
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Не удалось сохранить правило')
     } finally {
@@ -251,7 +368,7 @@ export function RulesDetailsPage() {
           </Button>
           <Button
             variant="contained"
-            onClick={() => void handleSave()}
+            onClick={() => handleOpenSaveDialog()}
             disabled={!canEdit || saveLoading || scriptFileLoading}
           >
             Сохранить
@@ -284,8 +401,22 @@ export function RulesDetailsPage() {
 
       <Stack spacing={2.5} sx={{ maxWidth: 900 }}>
         <TextField label="ID правила" value={ruleRow.id} disabled fullWidth />
-        <TextField label="Название правила" value={ruleRow.name} disabled fullWidth />
-        <TextField label="Условие срабатывания" value={conditionText} disabled fullWidth multiline minRows={3} />
+        <TextField
+          label="Название правила"
+          value={ruleName}
+          onChange={(event) => setRuleName(event.target.value)}
+          disabled={!canEdit}
+          fullWidth
+        />
+        <TextField
+          label="Условие срабатывания"
+          value={ruleCondition}
+          onChange={(event) => setRuleCondition(event.target.value)}
+          disabled={!canEdit}
+          fullWidth
+          multiline
+          minRows={3}
+        />
 
         <FormControl fullWidth>
           <InputLabel id="rule-risk-object-label">Рисковый объект</InputLabel>
@@ -561,6 +692,41 @@ export function RulesDetailsPage() {
               Открыть полную карточку
             </Button>
           ) : null}
+        </DialogActions>
+      </Dialog>
+      <Dialog open={saveDialogOpen} onClose={() => setSaveDialogOpen(false)} fullWidth maxWidth="sm">
+        <DialogTitle>Подтвердите сохранение изменений</DialogTitle>
+        <DialogContent dividers>
+          <Stack spacing={2}>
+            <Typography variant="body2">Будут сохранены изменения:</Typography>
+            <Box component="ul" sx={{ pl: 2, m: 0 }}>
+              {pendingChanges.map((line) => (
+                <Typography key={line} component="li" variant="body2">
+                  {line}
+                </Typography>
+              ))}
+            </Box>
+            <TextField
+              label="Комментарий изменений (description)"
+              value={saveComment}
+              onChange={(event) => {
+                setSaveComment(event.target.value)
+                if (saveCommentError) setSaveCommentError(null)
+              }}
+              error={Boolean(saveCommentError)}
+              helperText={saveCommentError ?? 'Этот текст будет отправлен в поле description'}
+              required
+              fullWidth
+              multiline
+              minRows={2}
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setSaveDialogOpen(false)}>Отмена</Button>
+          <Button variant="contained" onClick={() => void handleSave()} disabled={saveLoading}>
+            Сохранить изменения
+          </Button>
         </DialogActions>
       </Dialog>
     </Box>

@@ -10,6 +10,10 @@ import {
   Button,
   Chip,
   CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   Divider,
   FormControl,
   IconButton,
@@ -40,15 +44,16 @@ import { alpha, useTheme } from '@mui/material/styles'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  getRiskObjectModels,
+  getRuleChangeHistoryById,
   getRulesList,
   getRulesChangeHistory,
 } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
-import type { RuleChangeHistoryEntry } from '../types/risks'
+import type { RuleChangeHistoryDetails, RuleChangeHistoryEntry } from '../types/risks'
 import {
   type RuleTableRow,
   type RulePriority,
+  actionLabels,
   priorityLabels,
 } from './rulesShared'
 
@@ -78,7 +83,6 @@ export function RulesPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [tableRows, setTableRows] = useState<RuleTableRow[]>([])
-  const [riskObjectNamesById, setRiskObjectNamesById] = useState<Map<string, string>>(new Map())
   const [prioritySwitcher, setPrioritySwitcher] = useState<PrioritySwitcherValue>('all')
   const [ruleNameFilter, setRuleNameFilter] = useState('')
   const [priorityFilter, setPriorityFilter] = useState<PrioritySwitcherValue>('all')
@@ -96,6 +100,10 @@ export function RulesPage() {
   const [historyLoadingMore, setHistoryLoadingMore] = useState(false)
   const [historySearchInput, setHistorySearchInput] = useState('')
   const [historySearchDebounced, setHistorySearchDebounced] = useState('')
+  const [historyDetailsOpen, setHistoryDetailsOpen] = useState(false)
+  const [historyDetailsLoading, setHistoryDetailsLoading] = useState(false)
+  const [historyDetailsError, setHistoryDetailsError] = useState<string | null>(null)
+  const [historyDetails, setHistoryDetails] = useState<RuleChangeHistoryDetails | null>(null)
 
   const historyScrollRef = useRef<HTMLDivElement | null>(null)
   const historySentinelRef = useRef<HTMLDivElement | null>(null)
@@ -112,12 +120,11 @@ export function RulesPage() {
   useEffect(() => {
     if (!token) return
     let cancelled = false
-    Promise.all([getRulesList(token, user?.companyId), getRiskObjectModels(token)])
-      .then(([items, riskObjectModels]) => {
+    getRulesList(token, user?.companyId)
+      .then((items) => {
         if (cancelled) return
         setError(null)
         setTableRows(items)
-        setRiskObjectNamesById(new Map(riskObjectModels.map((item) => [item.id, item.name])))
       })
       .catch((e: unknown) => {
         if (cancelled) return
@@ -212,11 +219,11 @@ export function RulesPage() {
             .filter((row) => row.riskObjectId)
             .map((row) => [
               row.riskObjectId,
-              riskObjectNamesById.get(row.riskObjectId) ?? row.riskObjectId,
+              row.riskObjectId,
             ]),
         ).entries(),
       ).map(([id, label]) => ({ id, label })),
-    [tableRows, riskObjectNamesById],
+    [tableRows],
   )
 
   const filteredRows = useMemo(() => {
@@ -248,6 +255,22 @@ export function RulesPage() {
       return alpha(theme.palette.warning.main, 0.2)
     }
     return alpha(theme.palette.info.main, 0.12)
+  }
+
+  async function handleOpenHistoryDetails(entryId: string) {
+    if (!token) return
+    setHistoryDetailsOpen(true)
+    setHistoryDetailsLoading(true)
+    setHistoryDetailsError(null)
+    setHistoryDetails(null)
+    try {
+      const details = await getRuleChangeHistoryById(token, entryId, user?.companyId)
+      setHistoryDetails(details)
+    } catch (e: unknown) {
+      setHistoryDetailsError(e instanceof Error ? e.message : 'Не удалось загрузить запись истории')
+    } finally {
+      setHistoryDetailsLoading(false)
+    }
   }
 
   return (
@@ -365,7 +388,7 @@ export function RulesPage() {
                         <TableCell>{row.action}</TableCell>
                         <TableCell>{row.categoryLabel}</TableCell>
                         <TableCell>
-                          {riskObjectNamesById.get(row.riskObjectId) ?? row.riskObjectId ?? 'Не привязан'}
+                          {row.riskObjectId || 'Не привязан'}
                         </TableCell>
                         <TableCell align="right">
                           <Button
@@ -483,17 +506,27 @@ export function RulesPage() {
                                 </>
                               }
                             />
-                            <Button
-                              size="small"
-                              variant="outlined"
-                              startIcon={<VisibilityOutlinedIcon fontSize="small" />}
-                              onClick={() =>
-                                entry.ruleId ? navigate(`/app/rules/${entry.ruleId}`) : undefined
-                              }
-                              disabled={!entry.ruleId}
-                            >
-                              Просмотреть
-                            </Button>
+                            <Stack direction="row" spacing={1}>
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                startIcon={<VisibilityOutlinedIcon fontSize="small" />}
+                                onClick={() => void handleOpenHistoryDetails(entry.id)}
+                              >
+                                Подробнее
+                              </Button>
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                startIcon={<VisibilityOutlinedIcon fontSize="small" />}
+                                onClick={() =>
+                                  entry.ruleId ? navigate(`/app/rules/${entry.ruleId}`) : undefined
+                                }
+                                disabled={!entry.ruleId}
+                              >
+                                Просмотреть
+                              </Button>
+                            </Stack>
                           </ListItem>
                         </Box>
                       ))}
@@ -520,6 +553,133 @@ export function RulesPage() {
                 </Box>
               )}
             </Paper>
+
+            <Dialog
+              open={historyDetailsOpen}
+              onClose={() => setHistoryDetailsOpen(false)}
+              fullWidth
+              maxWidth="md"
+            >
+              <DialogTitle>Подробности изменения</DialogTitle>
+              <DialogContent dividers>
+                {historyDetailsLoading ? (
+                  <Box sx={{ py: 4, display: 'flex', justifyContent: 'center' }}>
+                    <CircularProgress />
+                  </Box>
+                ) : historyDetailsError ? (
+                  <Alert severity="error">{historyDetailsError}</Alert>
+                ) : historyDetails ? (
+                  <Stack spacing={2}>
+                    <TextField label="ID записи" value={historyDetails.id} fullWidth disabled />
+                    <TextField label="Название правила" value={historyDetails.ruleName} fullWidth disabled />
+                    <TextField
+                      label="Описание изменения"
+                      value={historyDetails.description}
+                      fullWidth
+                      disabled
+                      multiline
+                      minRows={3}
+                    />
+                    <TextField
+                      label="Дата и время"
+                      value={formatDateTime(historyDetails.changedAt)}
+                      fullWidth
+                      disabled
+                    />
+                    <TextField label="Автор" value={historyDetails.authorName} fullWidth disabled />
+                    <TextField label="ID автора" value={historyDetails.authorId} fullWidth disabled />
+                    <TextField label="ID правила" value={historyDetails.ruleId} fullWidth disabled />
+                    <TextField label="ID компании" value={historyDetails.companyId} fullWidth disabled />
+                    <TextField
+                      label="Условие правила"
+                      value={historyDetails.condition}
+                      fullWidth
+                      disabled
+                      multiline
+                      minRows={2}
+                    />
+                    <TextField label="Категория (ID)" value={historyDetails.categoryId} fullWidth disabled />
+                    <TextField
+                      label="Рисковый объект (ID)"
+                      value={historyDetails.riskObjectId}
+                      fullWidth
+                      disabled
+                    />
+                    <TextField
+                      label="Приоритет"
+                      value={
+                        historyDetails.priority in priorityLabels
+                          ? priorityLabels[historyDetails.priority as RulePriority]
+                          : historyDetails.priority
+                      }
+                      fullWidth
+                      disabled
+                    />
+                    <TextField
+                      label="Ответственный (ID)"
+                      value={historyDetails.responsibleUserId}
+                      fullWidth
+                      disabled
+                    />
+                    <TextField
+                      label="Действия"
+                      value={historyDetails.actions
+                        .map((action) =>
+                          action in actionLabels
+                            ? actionLabels[action as keyof typeof actionLabels]
+                            : action,
+                        )
+                        .join(', ')}
+                      fullWidth
+                      disabled
+                    />
+                    <TextField
+                      label="Статус"
+                      value={historyDetails.enabled ? 'Включено' : 'Отключено'}
+                      fullWidth
+                      disabled
+                    />
+                    <TextField
+                      label="Имя скрипта"
+                      value={historyDetails.mechanismScriptName}
+                      fullWidth
+                      disabled
+                    />
+                    <TextField
+                      label="Содержимое скрипта"
+                      value={historyDetails.mechanismScriptContent}
+                      fullWidth
+                      disabled
+                      multiline
+                      minRows={4}
+                    />
+                    <TextField
+                      label="Создал (ID)"
+                      value={historyDetails.createdByUserId}
+                      fullWidth
+                      disabled
+                    />
+                    <TextField
+                      label="Сохранено"
+                      value={historyDetails.savedAt ? formatDateTime(historyDetails.savedAt) : ''}
+                      fullWidth
+                      disabled
+                    />
+                  </Stack>
+                ) : null}
+              </DialogContent>
+              <DialogActions>
+                {historyDetails?.ruleId ? (
+                  <Button
+                    variant="outlined"
+                    onClick={() => navigate(`/app/rules/${historyDetails.ruleId}`)}
+                  >
+                    Открыть правило
+                  </Button>
+                ) : null}
+                <Button onClick={() => setHistoryDetailsOpen(false)}>Закрыть</Button>
+              </DialogActions>
+            </Dialog>
           </Stack>
 
           {filtersPanelOpen ? (

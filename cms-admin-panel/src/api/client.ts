@@ -25,9 +25,11 @@ import type {
   RiskCreatePayload,
   RiskCreateResponse,
   RiskItem,
+  RuleChangeHistoryDetails,
   RuleCreatePayload,
   RuleCreateResponse,
   RuleChangeHistoryPage,
+  RuleUpdatePayload,
 } from '../types/risks'
 import type { AccessPermission } from '../types/permissions'
 import type { Company } from '../types/company'
@@ -318,6 +320,23 @@ export type RuleListItemDto = {
   priority: RulePriorityDto
   enabled: boolean
   riskObjectId: string
+}
+
+export type RuleDetailsDto = {
+  id: string
+  companyId: string
+  name: string
+  condition: string
+  categoryId: string
+  riskObjectId: string
+  priority: RulePriorityDto
+  responsibleUserId: string
+  actions: RuleActionDto[]
+  enabled: boolean
+  mechanismScriptName: string
+  mechanismScriptContent: string
+  createdByUserId: string
+  savedAt: string
 }
 
 export type RuleRiskObjectOption = {
@@ -726,37 +745,71 @@ export async function getRisks(token: string, companyId?: string | null): Promis
   return data.items ?? []
 }
 
+const RFC4122_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+function pickStringField(row: Record<string, unknown>, keys: string[]): string {
+  for (const key of keys) {
+    const v = row[key]
+    if (typeof v === 'string' && v.trim()) return v.trim()
+  }
+  return ''
+}
+
+/** UUID для riskObjectId в POST /risks — только из полей модели, не из «человеческого» id логического объекта. */
+function extractRiskObjectModelPayloadUuid(row: Record<string, unknown>): string {
+  const directKeys = [
+    'uuid',
+    'UUID',
+    'Uuid',
+    'riskObjectUuid',
+    'risk_object_uuid',
+    'objectUuid',
+    'object_uuid',
+    'riskObjectUUID',
+  ] as const
+  const candidates: string[] = []
+  for (const k of directKeys) {
+    const v = row[k]
+    if (typeof v === 'string' && v.trim()) candidates.push(v.trim())
+  }
+  const nested =
+    row.riskObject && typeof row.riskObject === 'object' && !Array.isArray(row.riskObject)
+      ? (row.riskObject as Record<string, unknown>)
+      : null
+  if (nested) {
+    for (const k of directKeys) {
+      const v = nested[k]
+      if (typeof v === 'string' && v.trim()) candidates.push(v.trim())
+    }
+  }
+  const unique = [...new Set(candidates)]
+  const rfc = unique.find((s) => RFC4122_UUID_RE.test(s))
+  if (rfc) return rfc
+  const explicitUuid = typeof row.uuid === 'string' && row.uuid.trim() ? row.uuid.trim() : ''
+  if (explicitUuid) return explicitUuid
+  return unique[0] ?? ''
+}
+
 function normalizeRuleRiskObjectOptions(items: unknown[]): RuleRiskObjectOption[] {
   return items
     .map((item) => {
       if (!item || typeof item !== 'object' || Array.isArray(item)) return null
       const row = item as Record<string, unknown>
-      const uuidCandidate =
-        (typeof row.uuid === 'string' && row.uuid.trim()) ||
-        (typeof row.riskObjectUuid === 'string' && row.riskObjectUuid.trim()) ||
-        (typeof row.risk_object_uuid === 'string' && row.risk_object_uuid.trim()) ||
-        (typeof row.id === 'string' && row.id.trim()) ||
-        ''
+      const payloadUuid = extractRiskObjectModelPayloadUuid(row)
       const idCandidate =
-        (typeof row.id === 'string' && row.id.trim()) ||
-        (typeof row.riskObjectId === 'string' && row.riskObjectId.trim()) ||
-        (typeof row.risk_object_id === 'string' && row.risk_object_id.trim()) ||
-        uuidCandidate
+        pickStringField(row, ['id', 'riskObjectId', 'risk_object_id']) || payloadUuid
       const name =
-        (typeof row.name === 'string' && row.name.trim()) ||
-        (typeof row.riskObjectName === 'string' && row.riskObjectName.trim()) ||
+        pickStringField(row, ['name', 'riskObjectName']) ||
         ''
-      if (!uuidCandidate || !idCandidate || !name) return null
-      const code =
-        (typeof row.code === 'string' && row.code.trim()) ||
-        (typeof row.riskObjectCode === 'string' && row.riskObjectCode.trim()) ||
-        ''
+      if (!payloadUuid || !name) return null
+      const code = pickStringField(row, ['code', 'riskObjectCode'])
       return {
         id: idCandidate,
-        uuid: uuidCandidate,
+        uuid: payloadUuid,
         code,
         name,
-        detailsId: idCandidate,
+        detailsId: pickStringField(row, ['id', 'riskObjectId']) || idCandidate,
       } satisfies RuleRiskObjectOption
     })
     .filter((item): item is RuleRiskObjectOption => item !== null)
@@ -769,34 +822,17 @@ export async function getRuleRiskObjects(
   const res = await fetch(apiUrl('risk-object-models'), {
     headers: authHeaders(token, companyId),
   })
-  const data = (await res.json().catch(() => ({}))) as {
+  const parsed = (await res.json().catch(() => ({}))) as {
     message?: string
     items?: unknown[]
+    data?: { items?: unknown[] }
   }
   if (!res.ok) {
-    if (res.status === 404) {
-      const legacy = await getRiskObjects(token, 1, 500, companyId)
-      return legacy.items.map((item) => ({
-        id: item.id,
-        uuid: item.id,
-        code: item.code,
-        name: item.name,
-        detailsId: item.id,
-      }))
-    }
-    throw new Error(data.message ?? 'Не удалось загрузить рисковые объекты')
+    throw new Error(parsed.message ?? 'Не удалось загрузить рисковые объекты')
   }
-  if (!Array.isArray(data.items)) return []
-  const normalized = normalizeRuleRiskObjectOptions(data.items)
-  if (normalized.length > 0 || data.items.length === 0) return normalized
-  const legacy = await getRiskObjects(token, 1, 500, companyId)
-  return legacy.items.map((item) => ({
-    id: item.id,
-    uuid: item.id,
-    code: item.code,
-    name: item.name,
-    detailsId: item.id,
-  }))
+  const items = parsed.items ?? parsed.data?.items
+  if (!Array.isArray(items)) return []
+  return normalizeRuleRiskObjectOptions(items)
 }
 
 export async function getRulesList(
@@ -935,6 +971,60 @@ export async function getRuleOverrides(
   return data.items
 }
 
+export async function getRuleById(
+  token: string,
+  id: string,
+  companyId?: string | null,
+): Promise<RuleDetailsDto> {
+  const res = await fetch(apiUrl(`rules/${id}`), {
+    headers: authHeaders(token, companyId),
+  })
+  const data = (await res.json().catch(() => ({}))) as {
+    message?: string
+  } & Record<string, unknown>
+  if (!res.ok) {
+    throw new Error(data.message ?? 'Не удалось загрузить правило')
+  }
+  const item = data
+  const priorityValue = item.priority
+  const priority: RulePriorityDto =
+    priorityValue === 'low' || priorityValue === 'medium' || priorityValue === 'high'
+      ? priorityValue
+      : 'medium'
+  const actions = Array.isArray(item.actions)
+    ? item.actions.filter(
+        (value): value is RuleActionDto =>
+          value === 'createIncident' || value === 'sendNotification',
+      )
+    : []
+  if (
+    typeof item.id !== 'string' ||
+    typeof item.name !== 'string' ||
+    typeof item.condition !== 'string' ||
+    typeof item.categoryId !== 'string' ||
+    typeof item.riskObjectId !== 'string'
+  ) {
+    throw new Error('Некорректный ответ сервера')
+  }
+  return {
+    id: item.id,
+    companyId: typeof item.companyId === 'string' ? item.companyId : '',
+    name: item.name,
+    condition: item.condition,
+    categoryId: item.categoryId,
+    riskObjectId: item.riskObjectId,
+    priority,
+    responsibleUserId: typeof item.responsibleUserId === 'string' ? item.responsibleUserId : '',
+    actions,
+    enabled: typeof item.enabled === 'boolean' ? item.enabled : false,
+    mechanismScriptName: typeof item.mechanismScriptName === 'string' ? item.mechanismScriptName : '',
+    mechanismScriptContent:
+      typeof item.mechanismScriptContent === 'string' ? item.mechanismScriptContent : '',
+    createdByUserId: typeof item.createdByUserId === 'string' ? item.createdByUserId : '',
+    savedAt: typeof item.savedAt === 'string' ? item.savedAt : '',
+  }
+}
+
 export async function putRuleOverrideById(
   token: string,
   ruleId: string,
@@ -954,6 +1044,31 @@ export async function putRuleOverrideById(
     throw new Error(data.message ?? 'Не удалось сохранить настройки правила')
   }
   return data.item ?? {}
+}
+
+export async function putRuleById(
+  token: string,
+  id: string,
+  payload: RuleUpdatePayload,
+  companyId?: string | null,
+): Promise<RuleCreateResponse> {
+  const res = await fetch(apiUrl(`rules/${id}`), {
+    method: 'PUT',
+    headers: authHeaders(token, companyId),
+    body: JSON.stringify(payload),
+  })
+  const data = (await res.json().catch(() => ({}))) as {
+    message?: string
+    id?: string
+    savedAt?: string
+  }
+  if (!res.ok) {
+    throw new Error(data.message ?? 'Не удалось сохранить правило')
+  }
+  if (!data.id || !data.savedAt) {
+    throw new Error('Некорректный ответ сервера')
+  }
+  return { id: data.id, savedAt: data.savedAt }
 }
 
 export async function postRiskCreate(
@@ -1035,6 +1150,61 @@ export async function getRulesChangeHistory(
   return {
     items: data.items ?? [],
     hasMore: Boolean(data.hasMore),
+  }
+}
+
+export async function getRuleChangeHistoryById(
+  token: string,
+  historyId: string,
+  companyId?: string | null,
+): Promise<RuleChangeHistoryDetails> {
+  const res = await fetch(apiUrl(`rules/change-history/${historyId}`), {
+    headers: authHeaders(token, companyId),
+  })
+  const data = (await res.json().catch(() => ({}))) as {
+    message?: string
+  } & Partial<RuleChangeHistoryDetails>
+  if (!res.ok) {
+    throw new Error(data.message ?? 'Не удалось загрузить запись истории')
+  }
+  if (
+    typeof data.id !== 'string' ||
+    typeof data.changedAt !== 'string' ||
+    typeof data.ruleId !== 'string' ||
+    typeof data.ruleName !== 'string' ||
+    typeof data.description !== 'string' ||
+    typeof data.authorId !== 'string' ||
+    typeof data.authorName !== 'string' ||
+    typeof data.condition !== 'string' ||
+    typeof data.categoryId !== 'string' ||
+    typeof data.riskObjectId !== 'string'
+  ) {
+    throw new Error('Некорректный ответ сервера')
+  }
+  const actions = Array.isArray(data.actions)
+    ? data.actions.filter((value): value is string => typeof value === 'string')
+    : []
+  return {
+    id: data.id,
+    companyId: typeof data.companyId === 'string' ? data.companyId : '',
+    ruleId: data.ruleId,
+    changedAt: data.changedAt,
+    ruleName: data.ruleName,
+    description: data.description,
+    authorId: data.authorId,
+    authorName: data.authorName,
+    condition: data.condition,
+    categoryId: data.categoryId,
+    riskObjectId: data.riskObjectId,
+    priority: typeof data.priority === 'string' ? data.priority : '',
+    responsibleUserId: typeof data.responsibleUserId === 'string' ? data.responsibleUserId : '',
+    actions,
+    enabled: typeof data.enabled === 'boolean' ? data.enabled : false,
+    mechanismScriptName: typeof data.mechanismScriptName === 'string' ? data.mechanismScriptName : '',
+    mechanismScriptContent:
+      typeof data.mechanismScriptContent === 'string' ? data.mechanismScriptContent : '',
+    createdByUserId: typeof data.createdByUserId === 'string' ? data.createdByUserId : '',
+    savedAt: typeof data.savedAt === 'string' ? data.savedAt : '',
   }
 }
 

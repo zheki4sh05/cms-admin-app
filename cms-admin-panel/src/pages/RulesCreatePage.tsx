@@ -117,9 +117,12 @@ export function RulesCreatePage() {
       .then((items) => {
         if (cancelled) return
         setRiskObjects(items)
-        if (items.length > 0) {
-          setRiskObjectId((prev) => prev || items[0].uuid)
-        }
+        setRiskObjectId((prev) => {
+          if (items.length === 0) return ''
+          if (!prev) return items[0].uuid
+          const matched = items.find((item) => item.uuid === prev || item.id === prev)
+          return matched?.uuid ?? ''
+        })
       })
       .catch((e: unknown) => {
         if (cancelled) return
@@ -177,6 +180,14 @@ export function RulesCreatePage() {
       setError('Дождитесь загрузки содержимого файла скрипта')
       return
     }
+    const selectedRiskObject = riskObjects.find(
+      (item) => item.uuid === riskObjectId || item.id === riskObjectId,
+    )
+    const riskObjectUuid = selectedRiskObject?.uuid ?? ''
+    if (riskObjectId && !riskObjectUuid) {
+      setError('Не найден выбранный рисковый объект в каталоге моделей')
+      return
+    }
     setSaving(true)
     setError(null)
     setSuccess(null)
@@ -187,11 +198,11 @@ export function RulesCreatePage() {
         name: name.trim(),
         condition: description.trim(),
         categoryId,
-        riskObjectId: riskObjectId || undefined,
+        riskObjectId: riskObjectUuid || undefined,
         priority,
         responsibleUserId: responsibleUserId || undefined,
         actions,
-        enabled: riskObjectId ? enabled : false,
+        enabled: riskObjectUuid ? enabled : false,
         mechanismScriptName,
         mechanismScriptContent,
         },
@@ -210,6 +221,7 @@ export function RulesCreatePage() {
     description,
     categoryId,
     riskObjectId,
+    riskObjects,
     mechanismScriptName,
     mechanismScriptContent,
     priority,
