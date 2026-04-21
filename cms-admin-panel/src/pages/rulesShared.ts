@@ -19,6 +19,7 @@ export type RuleOverridesMap = Record<string, RuleOverrides>
 
 export type RuleTableRow = {
   id: string
+  specificId?: string
   name: string
   condition: string
   action: string

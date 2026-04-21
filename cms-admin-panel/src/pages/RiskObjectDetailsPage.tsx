@@ -40,26 +40,20 @@ import {
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
-  getRiskCategories,
-  getRisks,
-  getRuleOverrides,
+  getRulesList,
   getRiskObjectById,
-  putRuleOverrideById,
+  putRuleRiskObjectById,
   putRiskObjectById,
   putRiskObjectStatusById,
 } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
-import type { RiskItem } from '../types/risks'
 import type {
   RiskObjectStatusUpdatePayload,
   RiskObjectUpdatePayload,
 } from '../types/riskObjects'
 import {
-  buildRuleRows,
   priorityLabels,
-  type RiskCategoryOption,
   type RuleTableRow,
-  type RuleOverridesMap,
 } from './rulesShared'
 
 function newId() {
@@ -199,18 +193,18 @@ export function RiskObjectDetailsPage() {
   const [saveComment, setSaveComment] = useState('')
   const [saveCommentError, setSaveCommentError] = useState(false)
   const canEdit = editingEnabled && !isReadOnlyView && canManageRiskObjects
+  const canManageLinkedRisks = !isReadOnlyView && canManageRiskObjects
 
   const [name, setName] = useState('')
   const [code, setCode] = useState('')
+  const [riskObjectUuid, setRiskObjectUuid] = useState('')
   const [status, setStatus] = useState<'active' | 'archived'>('active')
   const [updatedAt, setUpdatedAt] = useState('')
   const [rootFields, setRootFields] = useState<RootField[]>([])
   const [initialSnapshot, setInitialSnapshot] = useState<RiskEditorSnapshot | null>(null)
-  const [risks, setRisks] = useState<RiskItem[]>([])
+  const [rules, setRules] = useState<RuleTableRow[]>([])
   const [risksLoading, setRisksLoading] = useState(true)
   const [risksError, setRisksError] = useState<string | null>(null)
-  const [riskCategories, setRiskCategories] = useState<RiskCategoryOption[]>([])
-  const [ruleOverrides, setRuleOverrides] = useState<RuleOverridesMap>({})
   const [riskToLinkId, setRiskToLinkId] = useState('')
 
   type OperationToast = { severity: 'success' | 'error'; text: string }
@@ -253,6 +247,7 @@ export function RiskObjectDetailsPage() {
         const fields = rootFieldsFromDefinition(data.definition ?? {})
         setName(data.name)
         setCode(data.code)
+        setRiskObjectUuid(data.uuid)
         setStatus(data.status)
         setUpdatedAt(data.updatedAt)
         setRootFields(fields)
@@ -281,20 +276,26 @@ export function RiskObjectDetailsPage() {
     let cancelled = false
     setRisksLoading(true)
     setRisksError(null)
-    Promise.all([
-      getRisks(token),
-      getRiskCategories(token),
-      getRuleOverrides(token),
-    ])
-      .then(([items, categoryItems, overrideItems]) => {
+    getRulesList(token)
+      .then((items) => {
         if (cancelled) return
-        setRisks(items)
-        setRiskCategories(categoryItems)
-        setRuleOverrides(overrideItems)
+        setRules(
+          items.map((item) => ({
+            id: item.id,
+            name: item.name,
+            condition: item.condition,
+            action: item.action,
+            categoryId: item.categoryId,
+            categoryLabel: item.categoryLabel,
+            priority: item.priority,
+            enabled: item.enabled,
+            riskObjectId: item.riskObjectId,
+          })),
+        )
       })
       .catch((e: unknown) => {
         if (cancelled) return
-        setRisksError(e instanceof Error ? e.message : 'Не удалось загрузить данные рисков')
+        setRisksError(e instanceof Error ? e.message : 'Не удалось загрузить список правил')
       })
       .finally(() => {
         if (!cancelled) setRisksLoading(false)
@@ -314,26 +315,35 @@ export function RiskObjectDetailsPage() {
 
   const linkedRules = useMemo<RuleTableRow[]>(() => {
     if (!id) return []
-    const rows = buildRuleRows(risks, ruleOverrides, riskCategories)
-    return rows.filter((row) => row.riskObjectId === id)
-  }, [id, risks, ruleOverrides, riskCategories])
+    return rules.filter(
+      (row) =>
+        row.riskObjectId === id ||
+        (Boolean(riskObjectUuid) && row.riskObjectId === riskObjectUuid),
+    )
+  }, [id, riskObjectUuid, rules])
 
   const availableRules = useMemo<RuleTableRow[]>(() => {
     if (!id) return []
-    const rows = buildRuleRows(risks, ruleOverrides, riskCategories)
-    return rows.filter((row) => row.riskObjectId !== id)
-  }, [id, risks, ruleOverrides, riskCategories])
+    return rules.filter(
+      (row) =>
+        row.riskObjectId !== id &&
+        (!riskObjectUuid || row.riskObjectId !== riskObjectUuid),
+    )
+  }, [id, riskObjectUuid, rules])
 
   const handleLinkRisk = useCallback(async () => {
-    if (!token || !id || !riskToLinkId) return
-    const previous = ruleOverrides[riskToLinkId] ?? {}
-    const nextOverride = {
-      ...previous,
-      riskObjectId: id,
+    if (!token || !riskToLinkId) return
+    if (!riskObjectUuid) {
+      showToast({ severity: 'error', text: 'Не удалось определить UUID рискового объекта' })
+      return
     }
     try {
-      await putRuleOverrideById(token, riskToLinkId, nextOverride)
-      setRuleOverrides((prev) => ({ ...prev, [riskToLinkId]: nextOverride }))
+      const result = await putRuleRiskObjectById(token, riskToLinkId, { riskObjectId: riskObjectUuid })
+      setRules((prev) =>
+        prev.map((row) =>
+          row.id === result.id ? { ...row, riskObjectId: result.riskObjectId ?? '' } : row,
+        ),
+      )
       const linkedRule = availableRules.find((row) => row.id === riskToLinkId)
       showToast({
         severity: 'success',
@@ -348,19 +358,18 @@ export function RiskObjectDetailsPage() {
         text: e instanceof Error ? e.message : 'Не удалось привязать риск',
       })
     }
-  }, [token, id, riskToLinkId, ruleOverrides, availableRules, showToast])
+  }, [token, riskToLinkId, riskObjectUuid, availableRules, showToast])
 
   const handleUnlinkRisk = useCallback(
     async (rule: RuleTableRow) => {
       if (!token) return
-      const previous = ruleOverrides[rule.id] ?? {}
-      const nextOverride = {
-        ...previous,
-        riskObjectId: '',
-      }
       try {
-        await putRuleOverrideById(token, rule.id, nextOverride)
-        setRuleOverrides((prev) => ({ ...prev, [rule.id]: nextOverride }))
+        const result = await putRuleRiskObjectById(token, rule.id, { riskObjectId: null })
+        setRules((prev) =>
+          prev.map((row) =>
+            row.id === result.id ? { ...row, riskObjectId: result.riskObjectId ?? '' } : row,
+          ),
+        )
         showToast({
           severity: 'success',
           text: `Связь с риском «${rule.name}» удалена`,
@@ -372,7 +381,7 @@ export function RiskObjectDetailsPage() {
         })
       }
     },
-    [token, ruleOverrides, showToast],
+    [token, showToast],
   )
 
   const setFromSnapshot = useCallback((snapshot: RiskEditorSnapshot) => {
@@ -913,7 +922,7 @@ export function RiskObjectDetailsPage() {
                   label="Добавить риск"
                   value={riskToLinkId}
                   onChange={(e) => setRiskToLinkId(e.target.value)}
-                  disabled={!canEdit || risksLoading || availableRules.length === 0}
+                  disabled={!canManageLinkedRisks || risksLoading || availableRules.length === 0}
                 >
                   {availableRules.map((row) => (
                     <MenuItem key={row.id} value={row.id}>
@@ -925,7 +934,7 @@ export function RiskObjectDetailsPage() {
               <Button
                 variant="contained"
                 onClick={handleLinkRisk}
-                disabled={!canEdit || !riskToLinkId}
+                disabled={!canManageLinkedRisks || !riskToLinkId}
               >
                 Добавить
               </Button>
@@ -986,7 +995,7 @@ export function RiskObjectDetailsPage() {
                               color="error"
                               variant="outlined"
                               onClick={() => handleUnlinkRisk(row)}
-                              disabled={!canEdit}
+                              disabled={!canManageLinkedRisks}
                             >
                               Убрать
                             </Button>

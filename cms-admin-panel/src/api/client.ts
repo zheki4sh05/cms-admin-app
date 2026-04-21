@@ -230,7 +230,7 @@ export async function postRefreshToken(refreshToken: string) {
 }
 
 export async function getMe(token: string) {
-  const res = await fetch(apiUrl('me'), {
+  const res = await fetch(apiUrl('users/me'), {
     headers: authHeaders(token),
   })
   const data = (await res.json().catch(() => ({}))) as {
@@ -642,6 +642,30 @@ export async function putUserStatus(
   return data.status
 }
 
+export type UpdateUserPayload = {
+  email: string
+  firstName: string
+  lastName: string
+}
+
+export async function putUserById(
+  token: string,
+  userId: string,
+  payload: UpdateUserPayload,
+): Promise<void> {
+  const res = await fetch(apiUrl(`users/${userId}`), {
+    method: 'PUT',
+    headers: authHeaders(token),
+    body: JSON.stringify(payload),
+  })
+  const data = (await res.json().catch(() => ({}))) as {
+    message?: string
+  }
+  if (!res.ok) {
+    throw new Error(data.message ?? 'Не удалось обновить профиль')
+  }
+}
+
 export async function getSettings(token: string) {
   const res = await fetch(apiUrl('settings'), {
     headers: authHeaders(token),
@@ -849,21 +873,27 @@ export async function getRulesList(
   if (!res.ok) {
     throw new Error(data.message ?? 'Не удалось загрузить правила')
   }
-  return (data.items ?? []).filter(
-    (item): item is RuleListItemDto =>
-      Boolean(
-        item &&
-          typeof item.id === 'string' &&
-          typeof item.name === 'string' &&
-          typeof item.condition === 'string' &&
-          typeof item.action === 'string' &&
-          typeof item.categoryId === 'string' &&
-          typeof item.categoryLabel === 'string' &&
-          (item.priority === 'low' || item.priority === 'medium' || item.priority === 'high') &&
-          typeof item.enabled === 'boolean' &&
-          typeof item.riskObjectId === 'string',
-      ),
-  )
+  return (data.items ?? [])
+    .map((item) => {
+      if (
+        !item ||
+        typeof item.id !== 'string' ||
+        typeof item.name !== 'string' ||
+        typeof item.condition !== 'string' ||
+        typeof item.action !== 'string' ||
+        typeof item.categoryId !== 'string' ||
+        typeof item.categoryLabel !== 'string' ||
+        (item.priority !== 'low' && item.priority !== 'medium' && item.priority !== 'high') ||
+        typeof item.enabled !== 'boolean'
+      ) {
+        return null
+      }
+      return {
+        ...item,
+        riskObjectId: typeof item.riskObjectId === 'string' ? item.riskObjectId : '',
+      } satisfies RuleListItemDto
+    })
+    .filter((item): item is RuleListItemDto => item !== null)
 }
 
 export async function getRiskCategories(
@@ -1044,6 +1074,49 @@ export async function putRuleOverrideById(
     throw new Error(data.message ?? 'Не удалось сохранить настройки правила')
   }
   return data.item ?? {}
+}
+
+export async function putRuleRiskObjectById(
+  token: string,
+  ruleId: string,
+  payload: { riskObjectId: string | null },
+  companyId?: string | null,
+): Promise<{ id: string; riskObjectId: string | null }> {
+  const requestBody = {
+    riskObjectId: payload.riskObjectId,
+  }
+  const res = await fetch(apiUrl(`rules/${ruleId}/risk-object`), {
+    method: 'PUT',
+    headers: authHeaders(token, companyId),
+    body: JSON.stringify(requestBody),
+  })
+  const data = (await res.json().catch(() => ({}))) as {
+    message?: string
+    id?: string
+    ruleId?: string
+    riskObjectId?: string | null
+    item?: {
+      id?: string
+      ruleId?: string
+      riskObjectId?: string | null
+    }
+  }
+  if (!res.ok || res.status !== 200) {
+    throw new Error(data.message ?? 'Не удалось обновить рисковый объект правила')
+  }
+  const responseId =
+    (typeof data.id === 'string' && data.id) ||
+    (typeof data.ruleId === 'string' && data.ruleId) ||
+    (typeof data.item?.id === 'string' && data.item.id) ||
+    (typeof data.item?.ruleId === 'string' && data.item.ruleId) ||
+    ruleId
+  const responseRiskObjectId =
+    typeof data.riskObjectId === 'string' || data.riskObjectId === null
+      ? data.riskObjectId
+      : typeof data.item?.riskObjectId === 'string' || data.item?.riskObjectId === null
+        ? data.item.riskObjectId
+        : payload.riskObjectId
+  return { id: responseId, riskObjectId: responseRiskObjectId }
 }
 
 export async function putRuleById(
@@ -1260,6 +1333,9 @@ export async function getRiskObjectById(
   const data = (await res.json().catch(() => ({}))) as {
     message?: string
     id?: string
+    uuid?: string
+    riskObjectUuid?: string
+    riskObjectId?: string
     code?: string
     name?: string
     status?: RiskObjectDetails['status']
@@ -1279,9 +1355,18 @@ export async function getRiskObjectById(
   ) {
     throw new Error('Некорректный ответ сервера')
   }
+  const uuidCandidate =
+    (typeof data.uuid === 'string' && data.uuid.trim()) ||
+    (typeof data.riskObjectUuid === 'string' && data.riskObjectUuid.trim()) ||
+    (typeof data.riskObjectId === 'string' && data.riskObjectId.trim()) ||
+    ''
+  if (!uuidCandidate) {
+    throw new Error('Не удалось получить UUID рискового объекта')
+  }
   const definition = parseDefinitionObject(data.definition)
   return {
     id: data.id,
+    uuid: uuidCandidate,
     code: data.code,
     name: data.name,
     status: data.status,

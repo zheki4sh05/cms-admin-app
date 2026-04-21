@@ -19,6 +19,8 @@ function issueMockTokens() {
 const adminUser: AppUser = {
   id: '1',
   name: 'Алексей Иванов',
+  firstName: 'Алексей',
+  lastName: 'Иванов',
   email: 'admin@trustflow.local',
   role: 'admin',
   companyId: 'company-trustflow-001',
@@ -42,6 +44,8 @@ const adminPermissions: AccessPermission[] = [
 const managerUser: AppUser = {
   id: '101',
   name: 'Алексей Иванов',
+  firstName: 'Алексей',
+  lastName: 'Иванов',
   email: 'manager@trustflow.local',
   role: 'manager',
   companyId: 'company-trustflow-001',
@@ -59,6 +63,8 @@ const managerPermissions: AccessPermission[] = [
 const headUser: AppUser = {
   id: '102',
   name: 'Мария Петрова',
+  firstName: 'Мария',
+  lastName: 'Петрова',
   email: 'head@trustflow.local',
   role: 'head',
   companyId: 'company-trustflow-001',
@@ -77,6 +83,8 @@ const headPermissions: AccessPermission[] = [
 const topManagerUser: AppUser = {
   id: '103',
   name: 'Иван Сидоров',
+  firstName: 'Иван',
+  lastName: 'Сидоров',
   email: 'top@trustflow.local',
   role: 'top_management',
   companyId: 'company-trustflow-001',
@@ -717,6 +725,20 @@ function parseAuth(request: Request): string | null {
   return header.slice('Bearer '.length)
 }
 
+function splitName(fullName: string): { firstName: string; lastName: string } {
+  const parts = fullName
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+  if (parts.length <= 1) {
+    return { firstName: parts[0] ?? '', lastName: '' }
+  }
+  return {
+    firstName: parts[0],
+    lastName: parts.slice(1).join(' '),
+  }
+}
+
 function isRiskCategory(categoryId: string): categoryId is 'financial' | 'reputational' | 'operational' {
   return categoryId === 'financial' || categoryId === 'reputational' || categoryId === 'operational'
 }
@@ -763,11 +785,22 @@ export const handlers = [
     return HttpResponse.json(tokens)
   }),
 
-  http.get('/api/me', async ({ request }) => {
+  http.get('/api/users/me', async ({ request }) => {
     await delay(200)
     const token = parseAuth(request)
     if (token !== MOCK_TOKEN) {
       return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
+    }
+    const userFromDirectory = mockUsers.find((item) => item.id === currentAuthAccount.user.id)
+    if (userFromDirectory) {
+      const parsedName = splitName(userFromDirectory.name)
+      return HttpResponse.json({
+        ...currentAuthAccount.user,
+        name: userFromDirectory.name,
+        firstName: parsedName.firstName || currentAuthAccount.user.firstName,
+        lastName: parsedName.lastName,
+        email: userFromDirectory.email,
+      })
     }
     return HttpResponse.json(currentAuthAccount.user)
   }),
@@ -833,6 +866,42 @@ export const handlers = [
       return HttpResponse.json({ message: 'Пользователь не найден' }, { status: 404 })
     }
     return HttpResponse.json({ accessPermissions: user.accessPermissions })
+  }),
+
+  http.put('/api/users/:id', async ({ request, params }) => {
+    await delay(260)
+    const token = parseAuth(request)
+    if (token !== MOCK_TOKEN) {
+      return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
+    }
+    const id = String(params.id ?? '')
+    const userIndex = mockUsers.findIndex((item) => item.id === id)
+    if (userIndex < 0) {
+      return HttpResponse.json({ message: 'Пользователь не найден' }, { status: 404 })
+    }
+    const body = (await request.json().catch(() => ({}))) as {
+      email?: unknown
+      firstName?: unknown
+      lastName?: unknown
+    }
+    const email = typeof body.email === 'string' ? body.email.trim() : ''
+    const firstName = typeof body.firstName === 'string' ? body.firstName.trim() : ''
+    const lastName = typeof body.lastName === 'string' ? body.lastName.trim() : ''
+    const fullName = [firstName, lastName].filter(Boolean).join(' ').trim()
+    if (!email || !firstName || !fullName) {
+      return HttpResponse.json({ message: 'Некорректные данные пользователя' }, { status: 400 })
+    }
+    mockUsers[userIndex] = {
+      ...mockUsers[userIndex],
+      email,
+      name: fullName,
+    }
+    return HttpResponse.json({
+      id,
+      email,
+      firstName,
+      lastName,
+    })
   }),
 
   http.put('/api/users/:id/status', async ({ request, params }) => {
@@ -1257,6 +1326,43 @@ export const handlers = [
     return HttpResponse.json({ item: next })
   }),
 
+  http.put('/api/rules/:ruleId/risk-object', async ({ request, params }) => {
+    await delay(220)
+    const token = parseAuth(request)
+    if (token !== MOCK_TOKEN) {
+      return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
+    }
+    const ruleId = String(params.ruleId ?? '')
+    const riskIndex = mockRisks.findIndex((item) => item.id === ruleId)
+    if (riskIndex < 0) {
+      return HttpResponse.json({ message: 'Правило не найдено' }, { status: 404 })
+    }
+    const body = (await request.json().catch(() => ({}))) as { riskObjectId?: unknown }
+    const riskObjectId = typeof body.riskObjectId === 'string' ? body.riskObjectId.trim() : ''
+    const riskObjectExists = !riskObjectId || mockRiskObjects.some((item) => item.id === riskObjectId)
+    if (!riskObjectExists) {
+      return HttpResponse.json({ message: 'Рисковый объект не найден' }, { status: 404 })
+    }
+
+    mockRisks = mockRisks.map((risk, index) =>
+      index === riskIndex
+        ? {
+            ...risk,
+            riskObjectId,
+          }
+        : risk,
+    )
+    mockRuleOverrides = {
+      ...mockRuleOverrides,
+      [ruleId]: {
+        ...(mockRuleOverrides[ruleId] ?? {}),
+        riskObjectId,
+      },
+    }
+
+    return HttpResponse.json({ id: ruleId, riskObjectId })
+  }),
+
   http.get('/api/risks', async ({ request }) => {
     await delay(220)
     const token = parseAuth(request)
@@ -1644,6 +1750,7 @@ export const handlers = [
     }
     return HttpResponse.json({
       id: row.id,
+      uuid: row.id,
       code: row.code,
       name: row.name,
       status: row.status,

@@ -49,6 +49,7 @@ export type RiskObjectUpdatePayload = RiskObjectCreatePayload & {
 
 export type RiskObjectDetails = {
   id: string
+  uuid: string
   code: string
   name: string
   status: RiskObjectStatus

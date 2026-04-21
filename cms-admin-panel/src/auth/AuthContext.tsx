@@ -23,6 +23,20 @@ const REFRESH_STORAGE_KEY = 'trustflow_refresh_token'
 const COMPANY_ID_STORAGE_KEY = 'trustflow_company_id'
 const USER_STORAGE_KEY = 'trustflow_me'
 
+function splitFullName(fullName: string): { firstName: string; lastName: string } {
+  const parts = fullName
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+  if (parts.length <= 1) {
+    return { firstName: parts[0] ?? '', lastName: '' }
+  }
+  return {
+    firstName: parts[0],
+    lastName: parts.slice(1).join(' '),
+  }
+}
+
 function getStoredCompanyIdFromKey(): string | undefined {
   if (typeof window === 'undefined') return undefined
   const v = localStorage.getItem(COMPANY_ID_STORAGE_KEY)?.trim()
@@ -46,7 +60,13 @@ function readStoredUser(): AppUser | null {
         getStoredCompanyIdFromKey() ||
         ''
       if (!companyId.trim()) return null
-      return { ...parsed, companyId } as AppUser
+      const parsedName = splitFullName(parsed.name)
+      const firstName =
+        (typeof parsed.firstName === 'string' && parsed.firstName.trim()) || parsedName.firstName
+      const lastName =
+        (typeof parsed.lastName === 'string' && parsed.lastName.trim()) || parsedName.lastName
+      if (!firstName.trim()) return null
+      return { ...parsed, companyId, firstName, lastName } as AppUser
     }
   } catch {
     // Ignore malformed stored user and continue with fresh auth state.
@@ -105,6 +125,30 @@ function pickDisplayName(r: Record<string, unknown>, stored: AppUser | null): st
   )
 }
 
+function pickFirstNameValue(r: Record<string, unknown>, stored: AppUser | null): string | undefined {
+  const direct =
+    pickString(r.firstName) ??
+    pickString(r.FirstName) ??
+    pickString(r.first_name) ??
+    pickString(r.First_Name) ??
+    stored?.firstName
+  if (direct) return direct
+  const fallbackName = pickDisplayName(r, stored) ?? ''
+  return splitFullName(fallbackName).firstName || undefined
+}
+
+function pickLastNameValue(r: Record<string, unknown>, stored: AppUser | null): string | undefined {
+  const direct =
+    pickString(r.lastName) ??
+    pickString(r.LastName) ??
+    pickString(r.last_name) ??
+    pickString(r.Last_Name) ??
+    stored?.lastName
+  if (direct !== undefined) return direct
+  const fallbackName = pickDisplayName(r, stored) ?? ''
+  return splitFullName(fallbackName).lastName
+}
+
 function pickEmail(r: Record<string, unknown>, stored: AppUser | null): string | undefined {
   return pickString(r.email) ?? pickString(r.Email) ?? stored?.email
 }
@@ -154,6 +198,8 @@ function formatMissingProfileHint(raw: unknown): string {
   if (!pickDisplayName(r, stored)) missing.push('name (или Name, fullName, displayName, firstName+lastName, …)')
   if (!pickEmail(r, stored)) missing.push('email (или Email)')
   if (!pickRoleValue(r, stored)) missing.push('role (или Role, roles[0], …)')
+  if (!pickFirstNameValue(r, stored)) missing.push('firstName (или FirstName)')
+  if (pickLastNameValue(r, stored) === undefined) missing.push('lastName (или LastName)')
   if (!pickCompanyIdValue(r, stored)?.trim()) {
     missing.push('companyId (или CompanyId, organizationId, tenantId, …) либо уже сохранённый trustflow_company_id')
   }
@@ -185,11 +231,21 @@ function normalizeAppUser(raw: unknown, stored: AppUser | null): AppUser | null 
   const name = pickDisplayName(r, stored)
   const email = pickEmail(r, stored)
   const role = pickRoleValue(r, stored)
+  const firstName = pickFirstNameValue(r, stored)
+  const lastName = pickLastNameValue(r, stored)
   const companyId = pickCompanyIdValue(r, stored) ?? ''
-  if (!id?.trim() || !name?.trim() || !email?.trim() || !role?.trim() || !companyId.trim()) {
+  if (
+    !id?.trim() ||
+    !name?.trim() ||
+    !email?.trim() ||
+    !role?.trim() ||
+    !firstName?.trim() ||
+    lastName === undefined ||
+    !companyId.trim()
+  ) {
     return stored
   }
-  return { id, name, email, role, companyId }
+  return { id, name, email, role, firstName, lastName, companyId }
 }
 
 /** Свести ответ GET /me с данными из localStorage (после login бэкенд может отдавать не все поля). */

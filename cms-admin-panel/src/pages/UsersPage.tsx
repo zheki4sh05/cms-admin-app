@@ -65,7 +65,7 @@ function statusLabel(status: UserStatus): string {
 function jobTitleLabel(jobTitle: JobTitle): string {
   if (jobTitle === 'manager') return 'менеджер'
   if (jobTitle === 'head') return 'руководитель'
-  return 'ТОП-менеджмент'
+  return 'топ менеджер'
 }
 
 function requiredViewPermissionForManagement(

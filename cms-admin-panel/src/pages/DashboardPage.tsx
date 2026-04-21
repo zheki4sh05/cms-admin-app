@@ -9,6 +9,7 @@ import {
   getUsersList,
 } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
+import { roleLabel } from '../utils/roleLabel'
 
 type DashboardCard = {
   section: string
@@ -172,7 +173,7 @@ export function DashboardPage() {
             {
               section: 'Личный кабинет',
               title: 'Роль',
-              value: user?.role ?? '—',
+              value: roleLabel(user?.role),
             },
           )
         }
