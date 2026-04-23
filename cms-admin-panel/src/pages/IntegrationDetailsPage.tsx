@@ -83,7 +83,7 @@ type EditorSnapshot = {
   riskObjectModelId: string
   pullConfig: PullIntegrationConfig
   pullQueryParams: PullRequestParamRow[]
-  status: IntegrationDetails['status']
+  active: boolean
   mappingRows: MappingRow[]
 }
 
@@ -206,7 +206,7 @@ export function IntegrationDetailsPage() {
   const [pullConfig, setPullConfig] = useState<PullIntegrationConfig>(createDefaultPullConfig())
   const [pullQueryParams, setPullQueryParams] = useState<PullRequestParamRow[]>([])
   const [showPullBasicPassword, setShowPullBasicPassword] = useState(false)
-  const [status, setStatus] = useState<IntegrationDetails['status']>('active')
+  const [active, setActive] = useState(true)
   const [mappingRows, setMappingRows] = useState<MappingRow[]>([{ id: newId(), from: '', to: '', applyJs: '' }])
   const [initialSnapshot, setInitialSnapshot] = useState<EditorSnapshot | null>(null)
 
@@ -379,7 +379,7 @@ export function IntegrationDetailsPage() {
       ...snapshot.pullConfig,
     })
     setPullQueryParams(snapshot.pullQueryParams.map((row) => ({ ...row, id: newId() })))
-    setStatus(snapshot.status)
+    setActive(snapshot.active)
     setMappingRows(snapshot.mappingRows.map((r) => ({ ...r, id: newId() })))
   }, [])
 
@@ -416,7 +416,7 @@ export function IntegrationDetailsPage() {
           value: item.value,
         }))
         setPullQueryParams(nextPullQueryParams)
-        setStatus(details.status)
+        setActive(details.active)
         setMappingRows(rows)
         setInitialSnapshot({
           name: details.name,
@@ -425,7 +425,7 @@ export function IntegrationDetailsPage() {
           riskObjectModelId: details.riskObjectModelId,
           pullConfig: nextPullConfig,
           pullQueryParams: nextPullQueryParams,
-          status: details.status,
+          active: details.active,
           mappingRows: rows,
         })
         setEditingEnabled(false)
@@ -569,7 +569,7 @@ export function IntegrationDetailsPage() {
         riskObjectModelId: payload.riskObjectModelId,
         pullConfig: payload.pullConfig ?? createDefaultPullConfig(),
         pullQueryParams: pullQueryParams.map((row) => ({ ...row, id: newId() })),
-        status,
+        active,
         mappingRows,
       }
       setInitialSnapshot(snapshot)
@@ -595,7 +595,7 @@ export function IntegrationDetailsPage() {
     mappingRows,
     normalizedPullPayload,
     pullQueryParams,
-    status,
+    active,
     showToast,
   ])
 
@@ -606,9 +606,9 @@ export function IntegrationDetailsPage() {
         showToast({ severity: 'error', text: 'Нет сессии — войдите снова.' })
         return
       }
-      const prevStatus = status
-      const nextStatus: IntegrationDetails['status'] = checked ? 'active' : 'inactive'
-      setStatus(nextStatus)
+      const prevActive = active
+      const nextStatus: IntegrationStatusUpdatePayload['status'] = checked ? 'active' : 'inactive'
+      setActive(checked)
       setStatusUpdating(true)
       try {
         const payload: IntegrationStatusUpdatePayload = { status: nextStatus }
@@ -619,7 +619,7 @@ export function IntegrationDetailsPage() {
           prev
             ? {
                 ...prev,
-                status: nextStatus,
+                active: checked,
               }
             : prev,
         )
@@ -628,7 +628,7 @@ export function IntegrationDetailsPage() {
           text: nextStatus === 'active' ? 'Статус: Active.' : 'Статус: Disable.',
         })
       } catch (e: unknown) {
-        setStatus(prevStatus)
+        setActive(prevActive)
         showToast({
           severity: 'error',
           text: e instanceof Error ? e.message : 'Не удалось обновить статус интеграции',
@@ -637,7 +637,7 @@ export function IntegrationDetailsPage() {
         setStatusUpdating(false)
       }
     },
-    [isReadOnlyView, canManageIntegrations, token, id, status, showToast],
+    [isReadOnlyView, canManageIntegrations, token, id, active, showToast],
   )
 
   const handleExport = useCallback(() => {
@@ -1132,7 +1132,7 @@ export function IntegrationDetailsPage() {
           <FormControlLabel
             control={
               <Switch
-                checked={status === 'active'}
+                checked={active}
                 onChange={(e) => void handleStatusSwitch(e.target.checked)}
                 disabled={statusUpdating || saving || isReadOnlyView || !canManageIntegrations}
               />
@@ -1141,7 +1141,7 @@ export function IntegrationDetailsPage() {
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                 <Typography variant="body2">Статус:</Typography>
                 <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                  {status === 'active' ? 'Active' : 'Disable'}
+                  {active ? 'Active' : 'Disable'}
                 </Typography>
                 {statusUpdating ? <CircularProgress size={14} /> : null}
               </Box>

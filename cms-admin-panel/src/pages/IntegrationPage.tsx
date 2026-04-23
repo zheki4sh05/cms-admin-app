@@ -54,6 +54,22 @@ function formatUpdatedAt(iso: string) {
   }
 }
 
+function integrationStateLabel(status: IntegrationConfig['status']) {
+  if (status === 'idle') return 'Idle'
+  if (status === 'loading') return 'Loading'
+  if (status === 'work') return 'Work'
+  if (status === 'failed') return 'Failed'
+  return 'Stop'
+}
+
+function integrationStateColor(status: IntegrationConfig['status']): 'default' | 'info' | 'success' | 'error' | 'warning' {
+  if (status === 'loading') return 'info'
+  if (status === 'work') return 'success'
+  if (status === 'failed') return 'error'
+  if (status === 'stop') return 'warning'
+  return 'default'
+}
+
 export function IntegrationPage() {
   const navigate = useNavigate()
   const { token, hasPermission } = useAuth()
@@ -223,7 +239,7 @@ export function IntegrationPage() {
               <TableCell width={56}>№</TableCell>
               <TableCell>Наименование</TableCell>
               <TableCell>Дата последнего изменения</TableCell>
-              <TableCell>Статус</TableCell>
+              <TableCell>Состояние</TableCell>
               <TableCell>Автор</TableCell>
               <TableCell align="right" width={140}>
                 Действия
@@ -247,9 +263,9 @@ export function IntegrationPage() {
                     <TableCell>
                       <Chip
                         size="small"
-                        label={row.status === 'active' ? 'Активно' : 'Не активно'}
-                        color={row.status === 'active' ? 'success' : 'default'}
-                        variant={row.status === 'active' ? 'filled' : 'outlined'}
+                        label={integrationStateLabel(row.status)}
+                        color={integrationStateColor(row.status)}
+                        variant={row.status === 'idle' ? 'outlined' : 'filled'}
                       />
                     </TableCell>
                     <TableCell>{row.authorName}</TableCell>

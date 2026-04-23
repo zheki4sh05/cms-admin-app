@@ -1,11 +1,13 @@
-export type IntegrationConfigStatus = 'active' | 'inactive'
+export type IntegrationActivationStatus = 'active' | 'inactive'
+export type IntegrationRuntimeStatus = 'idle' | 'loading' | 'work' | 'failed' | 'stop'
 
 export type IntegrationConfig = {
   id: string
   number: number
   name: string
   updatedAt: string
-  status: IntegrationConfigStatus
+  active: boolean
+  status: IntegrationRuntimeStatus
   authorName: string
 }
 
@@ -65,7 +67,8 @@ export type IntegrationDetails = {
   riskObjectModelId: string
   mapping_rules: IntegrationMappingRule[]
   pullConfig?: PullIntegrationConfig
-  status: IntegrationConfigStatus
+  active: boolean
+  status: IntegrationRuntimeStatus
   authorName: string
   updatedAt: string
 }
@@ -90,5 +93,5 @@ export type IntegrationDeleteResponse = {
 }
 
 export type IntegrationStatusUpdatePayload = {
-  status: IntegrationConfigStatus
+  status: IntegrationActivationStatus
 }

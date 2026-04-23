@@ -113,8 +113,8 @@ export function DashboardPage() {
 
         if (hasPageAccess('view_integrations_page')) {
           const items = integrationsPage.items
-          const active = items.filter((item) => item.status === 'active').length
-          const inactive = items.filter((item) => item.status === 'inactive').length
+          const active = items.filter((item) => item.active).length
+          const inactive = items.filter((item) => !item.active).length
           nextCards.push(
             {
               section: 'Интеграции',

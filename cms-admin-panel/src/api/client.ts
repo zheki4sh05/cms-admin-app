@@ -160,8 +160,18 @@ function normalizeIntegrationNumber(value: unknown): number | null {
   return null
 }
 
-function normalizeIntegrationStatus(value: unknown): IntegrationDetails['status'] | null {
-  return value === 'active' || value === 'inactive' ? value : null
+function normalizeIntegrationRuntimeStatus(value: unknown): IntegrationDetails['status'] | null {
+  return value === 'idle' ||
+    value === 'loading' ||
+    value === 'work' ||
+    value === 'failed' ||
+    value === 'stop'
+    ? value
+    : null
+}
+
+function normalizeIntegrationActive(value: unknown): boolean | null {
+  return typeof value === 'boolean' ? value : null
 }
 
 function normalizeIntegrationKind(value: unknown): IntegrationDetails['integrationKind'] | null {
@@ -468,12 +478,14 @@ export async function getIntegrationConfigs(
           if (!item || typeof item !== 'object' || Array.isArray(item)) return null
           const row = item as Record<string, unknown>
           const number = normalizeIntegrationNumber(row.number)
-          const status = normalizeIntegrationStatus(row.status)
+          const status = normalizeIntegrationRuntimeStatus(row.status)
+          const active = normalizeIntegrationActive(row.active)
           if (
             typeof row.id !== 'string' ||
             number === null ||
             typeof row.name !== 'string' ||
             typeof row.updatedAt !== 'string' ||
+            active === null ||
             status === null ||
             typeof row.authorName !== 'string'
           ) {
@@ -484,6 +496,7 @@ export async function getIntegrationConfigs(
             number,
             name: row.name,
             updatedAt: row.updatedAt,
+            active,
             status,
             authorName: row.authorName,
           } satisfies IntegrationConfig
@@ -513,7 +526,8 @@ export async function getIntegrationConfigById(
   const integrationKind = normalizeIntegrationKind(data.integrationKind)
   const mappingRules = normalizeIntegrationMappingRules(data.mapping_rules)
   const pullConfig = normalizePullConfig(data.pullConfig)
-  const status = normalizeIntegrationStatus(data.status)
+  const status = normalizeIntegrationRuntimeStatus(data.status)
+  const active = normalizeIntegrationActive(data.active)
   if (
     typeof data.id !== 'string' ||
     number === null ||
@@ -522,6 +536,7 @@ export async function getIntegrationConfigById(
     typeof data.endpointUrl !== 'string' ||
     typeof data.riskObjectModelId !== 'string' ||
     mappingRules === null ||
+    active === null ||
     status === null ||
     typeof data.authorName !== 'string' ||
     typeof data.updatedAt !== 'string'
@@ -537,6 +552,7 @@ export async function getIntegrationConfigById(
     riskObjectModelId: data.riskObjectModelId,
     mapping_rules: mappingRules,
     ...(pullConfig ? { pullConfig } : {}),
+    active,
     status,
     authorName: data.authorName,
     updatedAt: data.updatedAt,

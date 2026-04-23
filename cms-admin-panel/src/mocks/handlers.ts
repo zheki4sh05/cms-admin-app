@@ -221,7 +221,8 @@ let mockIntegrationConfigs = [
     number: 1,
     name: 'Обмен с 1С:Бухгалтерия',
     updatedAt: '2026-04-11T14:32:00.000Z',
-    status: 'active' as const,
+    active: true,
+    status: 'work' as const,
     authorName: 'Алексей Иванов',
   },
   {
@@ -229,7 +230,8 @@ let mockIntegrationConfigs = [
     number: 2,
     name: 'REST API: платёжный шлюз',
     updatedAt: '2026-04-09T09:15:00.000Z',
-    status: 'active' as const,
+    active: true,
+    status: 'loading' as const,
     authorName: 'Мария Петрова',
   },
   {
@@ -237,7 +239,8 @@ let mockIntegrationConfigs = [
     number: 3,
     name: 'Webhook: уведомления в Telegram',
     updatedAt: '2026-03-28T18:00:00.000Z',
-    status: 'inactive' as const,
+    active: false,
+    status: 'stop' as const,
     authorName: 'Алексей Иванов',
   },
   {
@@ -245,7 +248,8 @@ let mockIntegrationConfigs = [
     number: 4,
     name: 'SFTP: выгрузка отчётов',
     updatedAt: '2026-04-02T11:45:00.000Z',
-    status: 'inactive' as const,
+    active: false,
+    status: 'failed' as const,
     authorName: 'Иван Сидоров',
   },
   {
@@ -253,7 +257,8 @@ let mockIntegrationConfigs = [
     number: 5,
     name: 'OAuth2: корпоративный SSO',
     updatedAt: '2026-04-12T08:20:00.000Z',
-    status: 'active' as const,
+    active: true,
+    status: 'idle' as const,
     authorName: 'Мария Петрова',
   },
 ]
@@ -279,7 +284,8 @@ let mockIntegrationConfigDetails = [
       pageSize: 200,
       sinceStartDateEnabled: false,
     },
-    status: 'active' as const,
+    active: true,
+    status: 'work' as const,
     authorName: 'Алексей Иванов',
     updatedAt: '2026-04-11T14:32:00.000Z',
   },
@@ -294,7 +300,8 @@ let mockIntegrationConfigDetails = [
       { from: 'merchant_id', to: 'external_id' },
       { from: 'created_at', to: 'timestamp', transform: 'date_to_iso' },
     ],
-    status: 'active' as const,
+    active: true,
+    status: 'loading' as const,
     authorName: 'Мария Петрова',
     updatedAt: '2026-04-09T09:15:00.000Z',
   },
@@ -306,7 +313,8 @@ let mockIntegrationConfigDetails = [
     endpointUrl: 'https://notify.example.local/telegram',
     riskObjectModelId: 'rom-3',
     mapping_rules: [{ from: 'person_id', to: 'external_id' }],
-    status: 'inactive' as const,
+    active: false,
+    status: 'stop' as const,
     authorName: 'Алексей Иванов',
     updatedAt: '2026-03-28T18:00:00.000Z',
   },
@@ -326,7 +334,8 @@ let mockIntegrationConfigDetails = [
       pagedPollingEnabled: false,
       sinceStartDateEnabled: true,
     },
-    status: 'inactive' as const,
+    active: false,
+    status: 'failed' as const,
     authorName: 'Иван Сидоров',
     updatedAt: '2026-04-02T11:45:00.000Z',
   },
@@ -338,7 +347,8 @@ let mockIntegrationConfigDetails = [
     endpointUrl: 'https://sso.example.local/api/sync',
     riskObjectModelId: 'rom-1',
     mapping_rules: [{ from: 'sub', to: 'external_id' }],
-    status: 'active' as const,
+    active: true,
+    status: 'idle' as const,
     authorName: 'Мария Петрова',
     updatedAt: '2026-04-12T08:20:00.000Z',
   },
@@ -1076,7 +1086,8 @@ export const handlers = [
     const id = `ic-${Date.now()}`
     const number = mockIntegrationConfigs.length + 1
     const updatedAt = new Date().toISOString()
-    const status = 'active' as const
+    const active = true
+    const status = 'idle' as const
     const mappingRules = Array.isArray(body.mapping_rules) ? body.mapping_rules : []
 
     const listRow = {
@@ -1084,6 +1095,7 @@ export const handlers = [
       number,
       name: body.name.trim(),
       updatedAt,
+      active,
       status,
       authorName: adminUser.name,
     }
@@ -1099,6 +1111,7 @@ export const handlers = [
         riskObjectModelId: body.riskObjectModelId.trim(),
         mapping_rules: mappingRules,
         ...(normalizedPullConfig ? { pullConfig: normalizedPullConfig } : {}),
+        active,
         status,
         authorName: adminUser.name,
         updatedAt,
@@ -1219,6 +1232,7 @@ export const handlers = [
       ...(body.pullConfig !== undefined
         ? { pullConfig: normalizedPullConfig ?? prev.pullConfig }
         : {}),
+      active: prev.active,
       status: prev.status,
       authorName: adminUser.name,
       updatedAt,
@@ -1229,6 +1243,7 @@ export const handlers = [
         ? {
             ...it,
             name: next.name,
+            active: next.active,
             status: next.status,
             authorName: next.authorName,
             updatedAt: next.updatedAt,
@@ -1254,16 +1269,23 @@ export const handlers = [
       return HttpResponse.json({ message: 'Некорректный статус' }, { status: 400 })
     }
     const updatedAt = new Date().toISOString()
-    const nextStatus = body.status
+    const nextActive = body.status === 'active'
     mockIntegrationConfigDetails[idx] = {
       ...mockIntegrationConfigDetails[idx],
-      status: nextStatus,
+      active: nextActive,
+      status: nextActive ? 'work' : 'stop',
       updatedAt,
       authorName: adminUser.name,
     }
     mockIntegrationConfigs = mockIntegrationConfigs.map((it) =>
       it.id === id
-        ? { ...it, status: nextStatus, updatedAt, authorName: adminUser.name }
+        ? {
+            ...it,
+            active: nextActive,
+            status: nextActive ? 'work' : 'stop',
+            updatedAt,
+            authorName: adminUser.name,
+          }
         : it,
     )
     return HttpResponse.json({ id, savedAt: updatedAt })
