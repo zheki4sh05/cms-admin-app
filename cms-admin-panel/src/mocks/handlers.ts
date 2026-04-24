@@ -1265,11 +1265,11 @@ export const handlers = [
       return HttpResponse.json({ message: 'Интеграция не найдена' }, { status: 404 })
     }
     const body = (await request.json().catch(() => ({}))) as Record<string, unknown>
-    if (body.status !== 'active' && body.status !== 'inactive') {
+    if (typeof body.status !== 'boolean') {
       return HttpResponse.json({ message: 'Некорректный статус' }, { status: 400 })
     }
     const updatedAt = new Date().toISOString()
-    const nextActive = body.status === 'active'
+    const nextActive = body.status
     mockIntegrationConfigDetails[idx] = {
       ...mockIntegrationConfigDetails[idx],
       active: nextActive,

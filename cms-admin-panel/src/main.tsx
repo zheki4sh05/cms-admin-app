@@ -1,6 +1,7 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { AuthProvider } from './auth/AuthContext'
+import { WebSocketProvider } from './ws/WebSocketContext'
 import './index.css'
 import App from './App.tsx'
 
@@ -16,7 +17,9 @@ enableMocking().then(() => {
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
       <AuthProvider>
-        <App />
+        <WebSocketProvider>
+          <App />
+        </WebSocketProvider>
       </AuthProvider>
     </StrictMode>,
   )

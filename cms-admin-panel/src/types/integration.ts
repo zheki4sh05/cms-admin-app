@@ -1,4 +1,3 @@
-export type IntegrationActivationStatus = 'active' | 'inactive'
 export type IntegrationRuntimeStatus = 'idle' | 'loading' | 'work' | 'failed' | 'stop'
 
 export type IntegrationConfig = {
@@ -93,5 +92,5 @@ export type IntegrationDeleteResponse = {
 }
 
 export type IntegrationStatusUpdatePayload = {
-  status: IntegrationActivationStatus
+  status: boolean
 }

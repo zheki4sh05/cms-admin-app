@@ -60,6 +60,8 @@ npm run dev
 
 - `VITE_USE_MSW` — включить/выключить моки (`true/false`);
 - `VITE_API_BASE_URL` — базовый URL API (например `/api` или `http://localhost:3000/api`);
+- `VITE_WS_BASE_URL` — базовый URL Socket.IO сервиса (по умолчанию `http://localhost:8082`);
+- `VITE_WS_CLIENT_TYPE` — принудительный тип клиента для WS (`employee` или `admin`);
 - `VITE_MAIN_APP_URL` — ссылка на основное приложение (кнопка на странице логина).
 
 Пример запуска с реальным backend:
@@ -69,6 +71,50 @@ npm run dev:test
 ```
 
 Перед этим проверьте значения в `.env.test`.
+
+## WebSocket интеграция
+
+В проекте добавлен провайдер `WebSocketProvider`, который:
+
+- автоматически подключается к `path: /ws` после логина;
+- передаёт `access_token` и `client_type` в query;
+- использует backoff reconnect: `1000, 2000, 5000, 10000, 20000`;
+- закрывает соединение при logout/пропаже токена;
+- обрабатывает события `connection`, `counter:update`, `text:update`.
+
+По умолчанию `client_type` определяется из роли пользователя (`employee`/`admin`), либо можно зафиксировать его через `VITE_WS_CLIENT_TYPE`.
+
+Использование в компоненте:
+
+```tsx
+import { useEffect } from 'react'
+import { useWebSocket } from './ws/WebSocketContext'
+
+export function DashboardWidget() {
+  const { status, onCounterUpdate, onTextUpdate, lastError } = useWebSocket()
+
+  useEffect(() => {
+    const unsubscribeCounter = onCounterUpdate((payload) => {
+      console.log('counter:update', payload)
+    })
+    const unsubscribeText = onTextUpdate((payload) => {
+      console.log('text:update', payload)
+    })
+
+    return () => {
+      unsubscribeCounter()
+      unsubscribeText()
+    }
+  }, [onCounterUpdate, onTextUpdate])
+
+  return (
+    <div>
+      <div>WS status: {status}</div>
+      {lastError ? <div>WS error: {lastError}</div> : null}
+    </div>
+  )
+}
+```
 
 ## Сборка и деплой
 

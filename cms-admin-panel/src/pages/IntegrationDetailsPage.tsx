@@ -607,7 +607,7 @@ export function IntegrationDetailsPage() {
         return
       }
       const prevActive = active
-      const nextStatus: IntegrationStatusUpdatePayload['status'] = checked ? 'active' : 'inactive'
+      const nextStatus: IntegrationStatusUpdatePayload['status'] = checked
       setActive(checked)
       setStatusUpdating(true)
       try {
@@ -623,10 +623,7 @@ export function IntegrationDetailsPage() {
               }
             : prev,
         )
-        showToast({
-          severity: 'success',
-          text: nextStatus === 'active' ? 'Статус: Active.' : 'Статус: Disable.',
-        })
+        showToast({ severity: 'success', text: checked ? 'Статус: Active.' : 'Статус: Disable.' })
       } catch (e: unknown) {
         setActive(prevActive)
         showToast({
