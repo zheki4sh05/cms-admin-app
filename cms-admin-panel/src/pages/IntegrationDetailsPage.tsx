@@ -716,7 +716,14 @@ export function IntegrationDetailsPage() {
       }
       const prevActive = active
       const nextStatus: IntegrationStatusUpdatePayload['status'] = checked
+      const prevInvocationsSuccess = invocationsSuccess
+      const prevInvocationsFailed = invocationsFailed
       setActive(checked)
+      if (checked) {
+        // При запуске сервер сбрасывает счетчики вызовов — синхронизируем UI сразу.
+        setInvocationsSuccess(0)
+        setInvocationsFailed(0)
+      }
       setStatusUpdating(true)
       try {
         const payload: IntegrationStatusUpdatePayload = { status: nextStatus }
@@ -734,6 +741,8 @@ export function IntegrationDetailsPage() {
         showToast({ severity: 'success', text: checked ? 'Статус: Active.' : 'Статус: Disable.' })
       } catch (e: unknown) {
         setActive(prevActive)
+        setInvocationsSuccess(prevInvocationsSuccess)
+        setInvocationsFailed(prevInvocationsFailed)
         showToast({
           severity: 'error',
           text: e instanceof Error ? e.message : 'Не удалось обновить статус интеграции',
@@ -742,7 +751,16 @@ export function IntegrationDetailsPage() {
         setStatusUpdating(false)
       }
     },
-    [isReadOnlyView, canManageIntegrations, token, id, active, showToast],
+    [
+      isReadOnlyView,
+      canManageIntegrations,
+      token,
+      id,
+      active,
+      invocationsSuccess,
+      invocationsFailed,
+      showToast,
+    ],
   )
 
   const handleExport = useCallback(() => {
