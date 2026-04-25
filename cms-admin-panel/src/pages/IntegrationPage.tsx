@@ -3,7 +3,9 @@ import ChevronLeftIcon from '@mui/icons-material/ChevronLeft'
 import ChevronRightIcon from '@mui/icons-material/ChevronRight'
 import ClearIcon from '@mui/icons-material/Clear'
 import SearchIcon from '@mui/icons-material/Search'
+import StarRoundedIcon from '@mui/icons-material/StarRounded'
 import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined'
+import WarningAmberRoundedIcon from '@mui/icons-material/WarningAmberRounded'
 import {
   Alert,
   Box,
@@ -38,7 +40,10 @@ import { useAuth } from '../auth/AuthContext'
 import type {
   IntegrationChangeHistoryEntry,
   IntegrationConfig,
+  IntegrationRuntimeStatus,
 } from '../types/integration'
+import { useWebSocket } from '../ws/WebSocketContext'
+import type { TextUpdatePayload } from '../ws/types'
 
 function formatUpdatedAt(iso: string) {
   try {
@@ -70,9 +75,114 @@ function integrationStateColor(status: IntegrationConfig['status']): 'default' |
   return 'default'
 }
 
+function renderHealthBadge(health: IntegrationConfig['health']) {
+  if (health === 'good') {
+    return <StarRoundedIcon fontSize="small" sx={{ color: 'success.main' }} titleAccess="Хорошее" />
+  }
+  if (health === 'warning') {
+    return <WarningAmberRoundedIcon fontSize="small" sx={{ color: 'warning.main' }} titleAccess="Предупреждение" />
+  }
+  if (health === 'error') {
+    return <WarningAmberRoundedIcon fontSize="small" sx={{ color: 'error.main' }} titleAccess="Ошибка" />
+  }
+  return '—'
+}
+
+function isIntegrationRuntimeStatus(value: unknown): value is IntegrationRuntimeStatus {
+  return value === 'idle' || value === 'loading' || value === 'work' || value === 'failed' || value === 'stop'
+}
+
+function parseIntegrationStatusUpdate(
+  payload: TextUpdatePayload,
+): { entityId: string; status: IntegrationRuntimeStatus } | null {
+  if (payload.moduleType !== 'integration_status') return null
+  if (!payload.data || typeof payload.data !== 'object') return null
+
+  const data = payload.data as Record<string, unknown>
+  const nextStatus = data.status
+  if (!isIntegrationRuntimeStatus(nextStatus)) return null
+
+  const rawPayload = payload as unknown as Record<string, unknown>
+  const entityId = typeof rawPayload.entityId === 'string'
+    ? rawPayload.entityId.trim()
+    : typeof data.entityId === 'string'
+      ? data.entityId.trim()
+      : ''
+
+  if (!entityId) return null
+  return { entityId, status: nextStatus }
+}
+
+function parseInvocationCount(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value) && value >= 0) return value
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (!trimmed) return null
+    const parsed = Number(trimmed)
+    if (Number.isFinite(parsed) && parsed >= 0) return parsed
+  }
+  return null
+}
+
+function deriveHealthFromInvocations(
+  success: number,
+  failed: number,
+): IntegrationConfig['health'] {
+  if (failed <= 0) return 'good'
+  if (success <= 0) return 'error'
+  return 'warning'
+}
+
+function parseIntegrationInvocationsUpdate(
+  payload: TextUpdatePayload,
+): { entityId: string; invocationsSuccess: number; invocationsFailed: number } | null {
+  if (payload.moduleType !== 'integration_invocations') return null
+  if (!payload.data || typeof payload.data !== 'object') return null
+
+  const data = payload.data as Record<string, unknown>
+  const invocationsSuccess = parseInvocationCount(data.invocations_success)
+  const invocationsFailed = parseInvocationCount(data.invocations_failed)
+  if (invocationsSuccess === null || invocationsFailed === null) return null
+
+  const rawPayload = payload as unknown as Record<string, unknown>
+  const entityId = typeof rawPayload.entityId === 'string'
+    ? rawPayload.entityId.trim()
+    : typeof data.entityId === 'string'
+      ? data.entityId.trim()
+      : ''
+  if (!entityId) return null
+
+  return {
+    entityId,
+    invocationsSuccess,
+    invocationsFailed,
+  }
+}
+
+function matchesIntegrationEntity(
+  entityId: string,
+  integrationId: string,
+  integrationNumber?: number,
+): boolean {
+  const normalizedEntityId = entityId.trim().toLowerCase()
+  const normalizedIntegrationId = integrationId.trim().toLowerCase()
+  if (!normalizedEntityId || !normalizedIntegrationId) return false
+  if (normalizedEntityId === normalizedIntegrationId) return true
+
+  const entityDigits = normalizedEntityId.replace(/^ic-/, '')
+  const integrationDigits = normalizedIntegrationId.replace(/^ic-/, '')
+  if (entityDigits === integrationDigits) return true
+
+  if (integrationNumber !== undefined && Number.isFinite(integrationNumber)) {
+    return entityDigits === String(integrationNumber)
+  }
+  return false
+}
+
 export function IntegrationPage() {
   const navigate = useNavigate()
   const { token, hasPermission } = useAuth()
+  const { onTextUpdate } = useWebSocket()
   const canManageIntegrations = hasPermission('manage_integrations')
   const LIST_PAGE_SIZE = 6
   const [rows, setRows] = useState<IntegrationConfig[]>([])
@@ -164,6 +274,41 @@ export function IntegrationPage() {
     void fetchHistoryPage(1, false)
   }, [token, historySearchDebounced, fetchHistoryPage])
 
+  useEffect(() => {
+    return onTextUpdate((payload) => {
+      const statusUpdate = parseIntegrationStatusUpdate(payload)
+      if (statusUpdate) {
+        setRows((prev) => {
+          let hasTargetRow = false
+          const next = prev.map((row) => {
+            if (!matchesIntegrationEntity(statusUpdate.entityId, row.id, row.number)) return row
+            hasTargetRow = true
+            return { ...row, status: statusUpdate.status }
+          })
+          return hasTargetRow ? next : prev
+        })
+      }
+
+      const invocationsUpdate = parseIntegrationInvocationsUpdate(payload)
+      if (!invocationsUpdate) return
+      setRows((prev) => {
+        let hasTargetRow = false
+        const next = prev.map((row) => {
+          if (!matchesIntegrationEntity(invocationsUpdate.entityId, row.id, row.number)) return row
+          hasTargetRow = true
+          return {
+            ...row,
+            health: deriveHealthFromInvocations(
+              invocationsUpdate.invocationsSuccess,
+              invocationsUpdate.invocationsFailed,
+            ),
+          }
+        })
+        return hasTargetRow ? next : prev
+      })
+    })
+  }, [onTextUpdate])
+
   /** Бесконечная подгрузка: корень — блок с вертикальной прокруткой, а не всё окно. */
   useLayoutEffect(() => {
     if (!token || historyInitialLoading) return
@@ -233,13 +378,14 @@ export function IntegrationPage() {
         variant="outlined"
         sx={{ maxWidth: '100%', overflowX: 'auto', mb: 4 }}
       >
-        <Table size="small" sx={{ minWidth: 720 }}>
+        <Table size="small" sx={{ minWidth: 760 }}>
           <TableHead>
             <TableRow>
               <TableCell width={56}>№</TableCell>
               <TableCell>Наименование</TableCell>
               <TableCell>Дата последнего изменения</TableCell>
               <TableCell>Состояние</TableCell>
+              <TableCell align="center">Health</TableCell>
               <TableCell>Автор</TableCell>
               <TableCell align="right" width={140}>
                 Действия
@@ -250,7 +396,7 @@ export function IntegrationPage() {
             {loading
               ? Array.from({ length: 5 }).map((_, i) => (
                   <TableRow key={i}>
-                    <TableCell colSpan={6}>
+                    <TableCell colSpan={7}>
                       <Skeleton />
                     </TableCell>
                   </TableRow>
@@ -268,6 +414,7 @@ export function IntegrationPage() {
                         variant={row.status === 'idle' ? 'outlined' : 'filled'}
                       />
                     </TableCell>
+                    <TableCell align="center">{renderHealthBadge(row.health)}</TableCell>
                     <TableCell>{row.authorName}</TableCell>
                     <TableCell align="right">
                       <Button

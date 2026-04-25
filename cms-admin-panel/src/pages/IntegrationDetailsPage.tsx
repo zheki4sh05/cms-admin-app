@@ -49,6 +49,7 @@ import {
 } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import type {
+  IntegrationRuntimeStatus,
   IntegrationDetails,
   IntegrationMappingRule,
   PullIntegrationConfig,
@@ -58,6 +59,8 @@ import type {
   IntegrationUpdatePayload,
 } from '../types/integration'
 import type { RiskObjectModelListItem } from '../types/integrationDraft'
+import { useWebSocket } from '../ws/WebSocketContext'
+import type { TextUpdatePayload } from '../ws/types'
 
 function newId() {
   return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`
@@ -178,11 +181,94 @@ function normalizePullPollingPreset(value: unknown): PullPollingPreset {
   return 'hour'
 }
 
+function isIntegrationRuntimeStatus(value: unknown): value is IntegrationRuntimeStatus {
+  return value === 'idle' || value === 'loading' || value === 'work' || value === 'failed' || value === 'stop'
+}
+
+function parseIntegrationStatusUpdate(
+  payload: TextUpdatePayload,
+): { entityId: string; status: IntegrationRuntimeStatus } | null {
+  if (payload.moduleType !== 'integration_status') return null
+  if (!payload.data || typeof payload.data !== 'object') return null
+
+  const data = payload.data as Record<string, unknown>
+  const nextStatus = data.status
+  if (!isIntegrationRuntimeStatus(nextStatus)) return null
+
+  const rawPayload = payload as unknown as Record<string, unknown>
+  const entityId = typeof rawPayload.entityId === 'string'
+    ? rawPayload.entityId.trim()
+    : typeof data.entityId === 'string'
+      ? data.entityId.trim()
+      : ''
+
+  if (!entityId) return null
+  return { entityId, status: nextStatus }
+}
+
+function parseInvocationCount(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value) && value >= 0) return value
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (!trimmed) return null
+    const parsed = Number(trimmed)
+    if (Number.isFinite(parsed) && parsed >= 0) return parsed
+  }
+  return null
+}
+
+function parseIntegrationInvocationsUpdate(
+  payload: TextUpdatePayload,
+): { entityId: string; invocationsSuccess: number; invocationsFailed: number } | null {
+  if (payload.moduleType !== 'integration_invocations') return null
+  if (!payload.data || typeof payload.data !== 'object') return null
+
+  const data = payload.data as Record<string, unknown>
+  const invocationsSuccess = parseInvocationCount(data.invocations_success)
+  const invocationsFailed = parseInvocationCount(data.invocations_failed)
+  if (invocationsSuccess === null || invocationsFailed === null) return null
+
+  const rawPayload = payload as unknown as Record<string, unknown>
+  const entityId = typeof rawPayload.entityId === 'string'
+    ? rawPayload.entityId.trim()
+    : typeof data.entityId === 'string'
+      ? data.entityId.trim()
+      : ''
+  if (!entityId) return null
+
+  return {
+    entityId,
+    invocationsSuccess,
+    invocationsFailed,
+  }
+}
+
+function matchesIntegrationEntity(
+  entityId: string,
+  integrationId: string,
+  integrationNumber?: number,
+): boolean {
+  const normalizedEntityId = entityId.trim().toLowerCase()
+  const normalizedIntegrationId = integrationId.trim().toLowerCase()
+  if (!normalizedEntityId || !normalizedIntegrationId) return false
+  if (normalizedEntityId === normalizedIntegrationId) return true
+
+  const entityDigits = normalizedEntityId.replace(/^ic-/, '')
+  const integrationDigits = normalizedIntegrationId.replace(/^ic-/, '')
+  if (entityDigits === integrationDigits) return true
+
+  if (integrationNumber !== undefined && Number.isFinite(integrationNumber)) {
+    return entityDigits === String(integrationNumber)
+  }
+  return false
+}
+
 export function IntegrationDetailsPage() {
   const navigate = useNavigate()
   const { id = '' } = useParams()
   const [searchParams] = useSearchParams()
   const { token, hasPermission } = useAuth()
+  const { onTextUpdate } = useWebSocket()
   const isReadOnlyView = searchParams.get('readonly') === '1'
   const canManageIntegrations = hasPermission('manage_integrations')
 
@@ -207,6 +293,10 @@ export function IntegrationDetailsPage() {
   const [pullQueryParams, setPullQueryParams] = useState<PullRequestParamRow[]>([])
   const [showPullBasicPassword, setShowPullBasicPassword] = useState(false)
   const [active, setActive] = useState(true)
+  const [runtimeStatus, setRuntimeStatus] = useState<IntegrationDetails['status']>('idle')
+  const [invocationsSuccess, setInvocationsSuccess] = useState(0)
+  const [invocationsFailed, setInvocationsFailed] = useState(0)
+  const [failedComments, setFailedComments] = useState<string[]>([])
   const [mappingRows, setMappingRows] = useState<MappingRow[]>([{ id: newId(), from: '', to: '', applyJs: '' }])
   const [initialSnapshot, setInitialSnapshot] = useState<EditorSnapshot | null>(null)
 
@@ -417,6 +507,10 @@ export function IntegrationDetailsPage() {
         }))
         setPullQueryParams(nextPullQueryParams)
         setActive(details.active)
+        setRuntimeStatus(details.status)
+        setInvocationsSuccess(details.invocations_success)
+        setInvocationsFailed(details.invocations_failed)
+        setFailedComments(details.failed_comment)
         setMappingRows(rows)
         setInitialSnapshot({
           name: details.name,
@@ -446,6 +540,20 @@ export function IntegrationDetailsPage() {
       cancelled = true
     }
   }, [token, id])
+
+  useEffect(() => {
+    return onTextUpdate((payload) => {
+      const statusUpdate = parseIntegrationStatusUpdate(payload)
+      if (statusUpdate && matchesIntegrationEntity(statusUpdate.entityId, id, number)) {
+        setRuntimeStatus(statusUpdate.status)
+      }
+
+      const invocationsUpdate = parseIntegrationInvocationsUpdate(payload)
+      if (!invocationsUpdate || !matchesIntegrationEntity(invocationsUpdate.entityId, id, number)) return
+      setInvocationsSuccess(invocationsUpdate.invocationsSuccess)
+      setInvocationsFailed(invocationsUpdate.invocationsFailed)
+    })
+  }, [id, number, onTextUpdate])
 
   useEffect(() => {
     if (!token || !riskObjectModelId) {
@@ -732,6 +840,74 @@ export function IntegrationDetailsPage() {
           </Button>
         </Stack>
       </Box>
+
+      <Box sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+        <FormControlLabel
+          sx={{ m: 0 }}
+          control={
+            <Switch
+              checked={active}
+              onChange={(e) => void handleStatusSwitch(e.target.checked)}
+              disabled={statusUpdating || saving || isReadOnlyView || !canManageIntegrations}
+            />
+          }
+          label={active ? 'Остановить' : 'Запустить'}
+        />
+        {statusUpdating ? <CircularProgress size={14} /> : null}
+      </Box>
+
+      {active && runtimeStatus === 'stop' ? (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          Интеграция в процессе запуска и подготовки ресурсов.
+        </Alert>
+      ) : null}
+      {!active && runtimeStatus === 'work' ? (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          Подготовка к отключению интеграции и высвобождению ресурсов.
+        </Alert>
+      ) : null}
+
+      <Paper variant="outlined" sx={{ mb: 2, p: 2 }}>
+        <Typography variant="subtitle1" sx={{ mb: 1.5, fontWeight: 700 }}>
+          Сводная информация
+        </Typography>
+        <Stack spacing={0.5} sx={{ mb: 1.5 }}>
+          <Typography variant="body2">
+            Состояние:{' '}
+            <Box component="span" sx={{ fontWeight: 700 }}>
+              {runtimeStatus}
+            </Box>
+          </Typography>
+          <Typography variant="body2">
+            Количество успешных вызовов:{' '}
+            <Box component="span" sx={{ color: 'success.main', fontWeight: 700 }}>
+              {invocationsSuccess}
+            </Box>
+          </Typography>
+          <Typography variant="body2">
+            Количество неуспешных вызовов:{' '}
+            <Box component="span" sx={{ color: 'error.main', fontWeight: 700 }}>
+              {invocationsFailed}
+            </Box>
+          </Typography>
+        </Stack>
+        <Typography variant="body2" sx={{ mb: 0.5 }}>
+          Комментарии по ошибкам:
+        </Typography>
+        {failedComments.length > 0 ? (
+          <Box component="ul" sx={{ m: 0, pl: 2.5 }}>
+            {failedComments.map((comment, index) => (
+              <Box component="li" key={`${comment}-${index}`} sx={{ color: 'text.secondary' }}>
+                <Typography variant="body2">{comment}</Typography>
+              </Box>
+            ))}
+          </Box>
+        ) : (
+          <Typography variant="body2" color="text.secondary">
+            Нет комментариев.
+          </Typography>
+        )}
+      </Paper>
 
       {isReadOnlyView ? (
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
@@ -1125,25 +1301,6 @@ export function IntegrationDetailsPage() {
               </Stack>
             </Paper>
           ) : null}
-
-          <FormControlLabel
-            control={
-              <Switch
-                checked={active}
-                onChange={(e) => void handleStatusSwitch(e.target.checked)}
-                disabled={statusUpdating || saving || isReadOnlyView || !canManageIntegrations}
-              />
-            }
-            label={
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <Typography variant="body2">Статус:</Typography>
-                <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                  {active ? 'Active' : 'Disable'}
-                </Typography>
-                {statusUpdating ? <CircularProgress size={14} /> : null}
-              </Box>
-            }
-          />
 
           <TextField label="Автор изменения" value={authorName} fullWidth disabled />
           <TextField label="Обновлён" value={updatedAt ? new Date(updatedAt).toLocaleString('ru-RU') : ''} fullWidth disabled />

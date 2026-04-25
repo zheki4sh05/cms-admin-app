@@ -170,8 +170,32 @@ function normalizeIntegrationRuntimeStatus(value: unknown): IntegrationDetails['
     : null
 }
 
+function normalizeIntegrationHealth(value: unknown): IntegrationConfig['health'] {
+  return value === 'good' || value === 'warning' || value === 'error' ? value : null
+}
+
 function normalizeIntegrationActive(value: unknown): boolean | null {
   return typeof value === 'boolean' ? value : null
+}
+
+function normalizeNonNegativeNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value) && value >= 0) return value
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (!trimmed) return null
+    const parsed = Number(trimmed)
+    if (Number.isFinite(parsed) && parsed >= 0) return parsed
+  }
+  return null
+}
+
+function normalizeStringArray(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null
+  const normalized: string[] = []
+  for (const item of value) {
+    if (typeof item === 'string') normalized.push(item)
+  }
+  return normalized
 }
 
 function normalizeIntegrationKind(value: unknown): IntegrationDetails['integrationKind'] | null {
@@ -479,6 +503,7 @@ export async function getIntegrationConfigs(
           const row = item as Record<string, unknown>
           const number = normalizeIntegrationNumber(row.number)
           const status = normalizeIntegrationRuntimeStatus(row.status)
+          const health = normalizeIntegrationHealth(row.health ?? row.healt)
           const active = normalizeIntegrationActive(row.active)
           if (
             typeof row.id !== 'string' ||
@@ -498,6 +523,7 @@ export async function getIntegrationConfigs(
             updatedAt: row.updatedAt,
             active,
             status,
+            health,
             authorName: row.authorName,
           } satisfies IntegrationConfig
         })
@@ -528,6 +554,15 @@ export async function getIntegrationConfigById(
   const pullConfig = normalizePullConfig(data.pullConfig)
   const status = normalizeIntegrationRuntimeStatus(data.status)
   const active = normalizeIntegrationActive(data.active)
+  const invocationsSuccess = normalizeNonNegativeNumber(
+    (data as Partial<Record<'invocations_success', unknown>>).invocations_success,
+  )
+  const invocationsFailed = normalizeNonNegativeNumber(
+    (data as Partial<Record<'invocations_failed', unknown>>).invocations_failed,
+  )
+  const failedComment = normalizeStringArray(
+    (data as Partial<Record<'failed_comment', unknown>>).failed_comment,
+  )
   if (
     typeof data.id !== 'string' ||
     number === null ||
@@ -538,6 +573,9 @@ export async function getIntegrationConfigById(
     mappingRules === null ||
     active === null ||
     status === null ||
+    invocationsSuccess === null ||
+    invocationsFailed === null ||
+    failedComment === null ||
     typeof data.authorName !== 'string' ||
     typeof data.updatedAt !== 'string'
   ) {
@@ -554,6 +592,9 @@ export async function getIntegrationConfigById(
     ...(pullConfig ? { pullConfig } : {}),
     active,
     status,
+    invocations_success: invocationsSuccess,
+    invocations_failed: invocationsFailed,
+    failed_comment: failedComment,
     authorName: data.authorName,
     updatedAt: data.updatedAt,
   }

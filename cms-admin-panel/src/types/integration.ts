@@ -1,4 +1,5 @@
 export type IntegrationRuntimeStatus = 'idle' | 'loading' | 'work' | 'failed' | 'stop'
+export type IntegrationHealth = 'good' | 'warning' | 'error'
 
 export type IntegrationConfig = {
   id: string
@@ -7,6 +8,7 @@ export type IntegrationConfig = {
   updatedAt: string
   active: boolean
   status: IntegrationRuntimeStatus
+  health: IntegrationHealth | null
   authorName: string
 }
 
@@ -68,6 +70,9 @@ export type IntegrationDetails = {
   pullConfig?: PullIntegrationConfig
   active: boolean
   status: IntegrationRuntimeStatus
+  invocations_success: number
+  invocations_failed: number
+  failed_comment: string[]
   authorName: string
   updatedAt: string
 }
