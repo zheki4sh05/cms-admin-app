@@ -85,6 +85,8 @@ function mapRoleToJobTitle(role: unknown): JobTitle | null {
 }
 
 function mapLegacyJobTitle(jobTitle: unknown): JobTitle | null {
+  if (jobTitle === 'executive') return 'top_management'
+  if (jobTitle === 'supervisor') return 'head'
   if (jobTitle === 'manager' || jobTitle === 'head' || jobTitle === 'top_management') {
     return jobTitle
   }
