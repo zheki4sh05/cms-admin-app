@@ -36,6 +36,7 @@ import type {
 } from '../types/risks'
 import type { AccessPermission } from '../types/permissions'
 import type { Company } from '../types/company'
+import type { Department } from '../types/departments'
 
 const COMPANY_ID_STORAGE_KEY = 'trustflow_company_id'
 const REFRESH_ENDPOINT_PATH = '/auth/admin/refresh'
@@ -869,6 +870,57 @@ export async function postRiskObjectCreate(
   return { id: data.id, savedAt: data.savedAt }
 }
 
+export async function getCompanyDepartments(
+  token: string,
+  companyId?: string | null,
+): Promise<Department[]> {
+  const effectiveCompanyId = requireCompanyId(companyId)
+  const res = await fetch(apiUrl(`companies/${effectiveCompanyId}/departments`), {
+    headers: authHeaders(token, effectiveCompanyId),
+  })
+  const data = (await res.json().catch(() => ({}))) as {
+    message?: string
+    items?: unknown[]
+  } | unknown[]
+  if (!res.ok) {
+    const message =
+      typeof data === 'object' && data && !Array.isArray(data) && 'message' in data
+        ? (data as { message?: string }).message
+        : undefined
+    throw new Error(message ?? 'Не удалось загрузить отделы')
+  }
+  const rows: unknown[] = Array.isArray(data)
+    ? data
+    : Array.isArray((data as { items?: unknown[] })?.items)
+      ? ((data as { items?: unknown[] }).items ?? [])
+      : []
+  return rows
+    .map((item) => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) return null
+      const row = item as Record<string, unknown>
+      if (typeof row.id !== 'string' || typeof row.name !== 'string') return null
+      return {
+        id: row.id,
+        name: row.name,
+        description: typeof row.description === 'string' ? row.description : '',
+        managerId: typeof row.managerId === 'string' ? row.managerId : '',
+        supervisorName:
+          typeof row.supervisorName === 'string'
+            ? row.supervisorName
+            : typeof row.managerName === 'string'
+              ? row.managerName
+              : '',
+        employeeCount:
+          typeof row.employeeCount === 'number' && Number.isFinite(row.employeeCount)
+            ? row.employeeCount
+            : 0,
+        createdAt: typeof row.createdAt === 'string' ? row.createdAt : '',
+        updatedAt: typeof row.updatedAt === 'string' ? row.updatedAt : '',
+      } satisfies Department
+    })
+    .filter((item): item is Department => item !== null)
+}
+
 export async function getRiskObjects(
   token: string,
   page: number,
@@ -1481,6 +1533,7 @@ export async function getRiskObjectById(
     name?: string
     status?: RiskObjectDetails['status']
     updatedAt?: string
+    departmentId?: string
     definition?: string
   }
   if (!res.ok) {
@@ -1510,6 +1563,10 @@ export async function getRiskObjectById(
     uuid: uuidCandidate,
     code: data.code,
     name: data.name,
+    departmentId:
+      typeof data.departmentId === 'string' && data.departmentId.trim()
+        ? data.departmentId.trim()
+        : undefined,
     status: data.status,
     updatedAt: data.updatedAt,
     definition,

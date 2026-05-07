@@ -40,6 +40,7 @@ import {
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
+  getCompanyDepartments,
   getRulesList,
   getRiskObjectById,
   putRuleRiskObjectById,
@@ -47,6 +48,7 @@ import {
   putRiskObjectStatusById,
 } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
+import type { Department } from '../types/departments'
 import type {
   RiskObjectStatusUpdatePayload,
   RiskObjectUpdatePayload,
@@ -82,6 +84,7 @@ type RootField = {
 type RiskEditorSnapshot = {
   name: string
   code: string
+  departmentId: string
   status: 'active' | 'archived'
   updatedAt: string
   rootFields: RootField[]
@@ -179,7 +182,7 @@ export function RiskObjectDetailsPage() {
   const navigate = useNavigate()
   const { id = '' } = useParams()
   const [searchParams] = useSearchParams()
-  const { token, hasPermission } = useAuth()
+  const { token, user, hasPermission } = useAuth()
   const isReadOnlyView = searchParams.get('readonly') === '1'
   const canManageRiskObjects = hasPermission('manage_risk_objects')
 
@@ -201,6 +204,10 @@ export function RiskObjectDetailsPage() {
   const [status, setStatus] = useState<'active' | 'archived'>('active')
   const [updatedAt, setUpdatedAt] = useState('')
   const [rootFields, setRootFields] = useState<RootField[]>([])
+  const [departmentId, setDepartmentId] = useState('')
+  const [departments, setDepartments] = useState<Department[]>([])
+  const [departmentsLoading, setDepartmentsLoading] = useState(false)
+  const [departmentsError, setDepartmentsError] = useState<string | null>(null)
   const [initialSnapshot, setInitialSnapshot] = useState<RiskEditorSnapshot | null>(null)
   const [rules, setRules] = useState<RuleTableRow[]>([])
   const [risksLoading, setRisksLoading] = useState(true)
@@ -247,6 +254,7 @@ export function RiskObjectDetailsPage() {
         const fields = rootFieldsFromDefinition(data.definition ?? {})
         setName(data.name)
         setCode(data.code)
+        setDepartmentId(data.departmentId ?? '')
         setRiskObjectUuid(data.uuid)
         setStatus(data.status)
         setUpdatedAt(data.updatedAt)
@@ -254,6 +262,7 @@ export function RiskObjectDetailsPage() {
         setInitialSnapshot({
           name: data.name,
           code: data.code,
+          departmentId: data.departmentId ?? '',
           status: data.status,
           updatedAt: data.updatedAt,
           rootFields: fields,
@@ -270,6 +279,31 @@ export function RiskObjectDetailsPage() {
       cancelled = true
     }
   }, [token, id])
+
+  useEffect(() => {
+    if (!token || !user?.companyId) return
+    let cancelled = false
+    setDepartmentsLoading(true)
+    setDepartmentsError(null)
+    getCompanyDepartments(token, user.companyId)
+      .then((items) => {
+        if (cancelled) return
+        setDepartments(items)
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return
+        setDepartments([])
+        setDepartmentsError(
+          e instanceof Error ? e.message : 'Не удалось загрузить отделы компании',
+        )
+      })
+      .finally(() => {
+        if (!cancelled) setDepartmentsLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [token, user?.companyId])
 
   useEffect(() => {
     if (!token) return
@@ -396,6 +430,7 @@ export function RiskObjectDetailsPage() {
     }))
     setName(snapshot.name)
     setCode(snapshot.code)
+    setDepartmentId(snapshot.departmentId)
     setStatus(snapshot.status)
     setUpdatedAt(snapshot.updatedAt)
     setRootFields(clonedFields)
@@ -423,6 +458,7 @@ export function RiskObjectDetailsPage() {
     const payload: RiskObjectUpdatePayload = {
       name: name.trim(),
       definition: buildPayloadObject(rootFields),
+      ...(departmentId ? { departmentId } : {}),
       changeComment: comment,
     }
     setSaving(true)
@@ -432,6 +468,7 @@ export function RiskObjectDetailsPage() {
       const snapshot: RiskEditorSnapshot = {
         name: payload.name || name,
         code,
+        departmentId: departmentId || '',
         status,
         updatedAt: result.savedAt,
         rootFields,
@@ -457,6 +494,7 @@ export function RiskObjectDetailsPage() {
     id,
     name,
     rootFields,
+    departmentId,
     code,
     status,
     saveComment,
@@ -773,6 +811,102 @@ export function RiskObjectDetailsPage() {
             disabled={!canEdit}
             autoComplete="off"
           />
+          <Box>
+            <Typography variant="subtitle1" sx={{ mb: 0.5 }}>
+              Привязка к отделу
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+              К рисковому объекту можно привязать только один отдел.
+            </Typography>
+            <Stack
+              direction={{ xs: 'column', md: 'row' }}
+              spacing={1}
+              sx={{ mb: 1.5, alignItems: { md: 'center' } }}
+            >
+              <FormControl size="small" sx={{ minWidth: { xs: '100%', md: 420 } }}>
+                <InputLabel id="risk-object-department-label">Отдел</InputLabel>
+                <Select
+                  labelId="risk-object-department-label"
+                  label="Отдел"
+                  value={departmentId}
+                  onChange={(e) => setDepartmentId(e.target.value)}
+                  disabled={!canEdit || departmentsLoading}
+                >
+                  <MenuItem value="">
+                    <em>Без привязки к отделу</em>
+                  </MenuItem>
+                  {departments.map((department) => (
+                    <MenuItem key={department.id} value={department.id}>
+                      {department.name} ({department.employeeCount} сотрудников)
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <Button
+                variant="outlined"
+                onClick={() => setDepartmentId('')}
+                disabled={!canEdit || !departmentId}
+              >
+                Очистить
+              </Button>
+            </Stack>
+            {departmentsError ? (
+              <Alert severity="error" sx={{ mb: 1.5 }}>
+                {departmentsError}
+              </Alert>
+            ) : null}
+            <TableContainer component={Paper} variant="outlined" sx={{ mb: 1 }}>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Отдел</TableCell>
+                    <TableCell>ID</TableCell>
+                    <TableCell>Описание</TableCell>
+                    <TableCell>Руководитель</TableCell>
+                    <TableCell>Сотрудников</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {departmentsLoading ? (
+                    <TableRow>
+                      <TableCell colSpan={5}>
+                        <Box sx={{ py: 2, display: 'flex', justifyContent: 'center' }}>
+                          <CircularProgress size={24} />
+                        </Box>
+                      </TableCell>
+                    </TableRow>
+                  ) : departments.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={5}>
+                        <Typography variant="body2" color="text.secondary">
+                          Отделы не найдены.
+                        </Typography>
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    departments.map((department) => (
+                      <TableRow
+                        key={department.id}
+                        hover
+                        selected={department.id === departmentId}
+                        onClick={() => {
+                          if (!canEdit) return
+                          setDepartmentId(department.id)
+                        }}
+                        sx={{ cursor: canEdit ? 'pointer' : 'default' }}
+                      >
+                        <TableCell>{department.name}</TableCell>
+                        <TableCell>{department.id}</TableCell>
+                        <TableCell>{department.description || '-'}</TableCell>
+                        <TableCell>{department.supervisorName || '-'}</TableCell>
+                        <TableCell>{department.employeeCount}</TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </Box>
           <FormControlLabel
             control={
               <Switch

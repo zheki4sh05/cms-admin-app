@@ -9,6 +9,7 @@ import {
   Alert,
   Box,
   Button,
+  CircularProgress,
   Dialog,
   DialogActions,
   DialogContent,
@@ -24,15 +25,22 @@ import {
   type SlideProps,
   Snackbar,
   Stack,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
   TextField,
   Typography,
 } from '@mui/material'
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, SyntheticEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { postRiskObjectCreate } from '../api/client'
+import { getCompanyDepartments, postRiskObjectCreate } from '../api/client'
 import type { RiskObjectCreatePayload } from '../types/riskObjects'
 import { useAuth } from '../auth/AuthContext'
+import type { Department } from '../types/departments'
 
 function newId() {
   return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`
@@ -201,12 +209,16 @@ function downloadJsonFile(filename: string, jsonText: string) {
 
 export function RiskObjectCreatePage() {
   const navigate = useNavigate()
-  const { token, hasPermission } = useAuth()
+  const { token, user, hasPermission } = useAuth()
   const canManageRiskObjects = hasPermission('manage_risk_objects')
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const [objectName, setObjectName] = useState('')
   const [rootFields, setRootFields] = useState<RootField[]>([])
+  const [departments, setDepartments] = useState<Department[]>([])
+  const [departmentsLoading, setDepartmentsLoading] = useState(false)
+  const [departmentsError, setDepartmentsError] = useState<string | null>(null)
+  const [departmentId, setDepartmentId] = useState('')
 
   const [clearDialogOpen, setClearDialogOpen] = useState(false)
   const [saveLoading, setSaveLoading] = useState(false)
@@ -239,6 +251,36 @@ export function RiskObjectCreatePage() {
     }
   }, [rootFields])
 
+  const selectedDepartment = useMemo(
+    () => departments.find((department) => department.id === departmentId) ?? null,
+    [departments, departmentId],
+  )
+
+  useEffect(() => {
+    if (!token || !user?.companyId) return
+    let cancelled = false
+    setDepartmentsLoading(true)
+    setDepartmentsError(null)
+    getCompanyDepartments(token, user.companyId)
+      .then((items) => {
+        if (cancelled) return
+        setDepartments(items)
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return
+        setDepartments([])
+        setDepartmentsError(
+          e instanceof Error ? e.message : 'Не удалось загрузить отделы компании',
+        )
+      })
+      .finally(() => {
+        if (!cancelled) setDepartmentsLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [token, user?.companyId])
+
   const handleExport = useCallback(() => {
     const doc = buildPayloadObject(rootFields)
     const text = JSON.stringify(doc, null, 2)
@@ -259,6 +301,7 @@ export function RiskObjectCreatePage() {
       const payload: RiskObjectCreatePayload = {
         name: objectName.trim(),
         definition: buildPayloadObject(rootFields),
+        ...(departmentId ? { departmentId } : {}),
       }
       await postRiskObjectCreate(token, payload)
       showToast({ severity: 'success', text: 'Данные сохранены на сервере.' })
@@ -270,11 +313,12 @@ export function RiskObjectCreatePage() {
     } finally {
       setSaveLoading(false)
     }
-  }, [token, canManageRiskObjects, objectName, rootFields, showToast])
+  }, [token, canManageRiskObjects, objectName, rootFields, departmentId, showToast])
 
   const confirmClear = useCallback(() => {
     setObjectName('')
     setRootFields([])
+    setDepartmentId('')
     setClearDialogOpen(false)
     showToast({ severity: 'success', text: 'Конструктор очищен.' })
   }, [showToast])
@@ -529,6 +573,124 @@ export function RiskObjectCreatePage() {
             disabled={!canManageRiskObjects}
             helperText="В превью и в экспорте наименование не входит в JSON — только в имя файла. При импорте поле заполняется из имени файла (без .json). На сервер наименование уходит отдельно от структуры."
           />
+
+          <Box>
+            <Typography variant="subtitle1" sx={{ mb: 0.5 }}>
+              Привязка к отделу
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+              Можно привязать только один отдел. В таблице ниже доступна полная информация по
+              отделам компании.
+            </Typography>
+            <Stack
+              direction={{ xs: 'column', sm: 'row' }}
+              spacing={1}
+              sx={{ mb: 1.5, alignItems: { sm: 'center' } }}
+            >
+              <FormControl size="small" fullWidth>
+                <FormLabel id="risk-object-department-label" sx={{ mb: 0.75, display: 'block' }}>
+                  Отдел
+                </FormLabel>
+                <Select
+                  aria-labelledby="risk-object-department-label"
+                  value={departmentId}
+                  onChange={(e) => setDepartmentId(e.target.value)}
+                  displayEmpty
+                  disabled={!canManageRiskObjects || departmentsLoading}
+                >
+                  <MenuItem value="">
+                    <em>Без привязки к отделу</em>
+                  </MenuItem>
+                  {departments.map((department) => (
+                    <MenuItem key={department.id} value={department.id}>
+                      {department.name} ({department.employeeCount} сотрудников)
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <Button
+                variant="outlined"
+                color="inherit"
+                onClick={() => setDepartmentId('')}
+                disabled={!canManageRiskObjects || !departmentId}
+              >
+                Очистить
+              </Button>
+            </Stack>
+            {selectedDepartment ? (
+              <Alert severity="info" sx={{ mb: 1.5 }}>
+                Выбран отдел: {selectedDepartment.name}
+              </Alert>
+            ) : null}
+            {departmentsError ? (
+              <Alert severity="error" sx={{ mb: 1.5 }}>
+                {departmentsError}
+              </Alert>
+            ) : null}
+            <TableContainer component={Paper} variant="outlined">
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Отдел</TableCell>
+                    <TableCell>ID</TableCell>
+                    <TableCell>Описание</TableCell>
+                    <TableCell>Руководитель</TableCell>
+                    <TableCell>Сотрудников</TableCell>
+                    <TableCell>Создан</TableCell>
+                    <TableCell>Обновлен</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {departmentsLoading ? (
+                    <TableRow>
+                      <TableCell colSpan={7}>
+                        <Box sx={{ py: 2, display: 'flex', justifyContent: 'center' }}>
+                          <CircularProgress size={24} />
+                        </Box>
+                      </TableCell>
+                    </TableRow>
+                  ) : departments.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={7}>
+                        <Typography variant="body2" color="text.secondary">
+                          Отделы не найдены.
+                        </Typography>
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    departments.map((department) => (
+                      <TableRow
+                        key={department.id}
+                        hover
+                        selected={department.id === departmentId}
+                        onClick={() => {
+                          if (!canManageRiskObjects) return
+                          setDepartmentId(department.id)
+                        }}
+                        sx={{ cursor: canManageRiskObjects ? 'pointer' : 'default' }}
+                      >
+                        <TableCell>{department.name}</TableCell>
+                        <TableCell>{department.id}</TableCell>
+                        <TableCell>{department.description || '-'}</TableCell>
+                        <TableCell>{department.supervisorName || '-'}</TableCell>
+                        <TableCell>{department.employeeCount}</TableCell>
+                        <TableCell>
+                          {department.createdAt
+                            ? new Date(department.createdAt).toLocaleString('ru-RU')
+                            : '-'}
+                        </TableCell>
+                        <TableCell>
+                          {department.updatedAt
+                            ? new Date(department.updatedAt).toLocaleString('ru-RU')
+                            : '-'}
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </Box>
 
           <Box>
             <Typography variant="subtitle1" sx={{ mb: 0.5 }}>

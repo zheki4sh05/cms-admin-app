@@ -139,6 +139,53 @@ const mockCompanies = [
   },
 ] as const
 
+const mockDepartmentsByCompanyId: Record<
+  string,
+  Array<{
+    id: string
+    name: string
+    description: string
+    managerId: string
+    supervisorName: string
+    employeeCount: number
+    createdAt: string
+    updatedAt: string
+  }>
+> = {
+  'company-trustflow-001': [
+    {
+      id: 'dep-1',
+      name: 'Служба финансового мониторинга',
+      description: 'Проверка платежных операций и аномалий',
+      managerId: '101',
+      supervisorName: 'Алексей Иванов',
+      employeeCount: 18,
+      createdAt: '2026-01-10T09:00:00.000Z',
+      updatedAt: '2026-04-15T12:30:00.000Z',
+    },
+    {
+      id: 'dep-2',
+      name: 'Отдел комплаенс-контроля',
+      description: 'Контроль регуляторных требований и KYC/AML',
+      managerId: '102',
+      supervisorName: 'Мария Петрова',
+      employeeCount: 11,
+      createdAt: '2026-02-01T10:00:00.000Z',
+      updatedAt: '2026-04-20T08:15:00.000Z',
+    },
+    {
+      id: 'dep-3',
+      name: 'Операционный риск',
+      description: 'Управление внутренними рисками и инцидентами',
+      managerId: '103',
+      supervisorName: 'Иван Сидоров',
+      employeeCount: 9,
+      createdAt: '2026-01-22T11:00:00.000Z',
+      updatedAt: '2026-05-01T15:45:00.000Z',
+    },
+  ],
+}
+
 let currentAuthAccount =
   demoAuthAccounts.find((account) => account.user.email === adminUser.email) ??
   demoAuthAccounts[0]
@@ -902,6 +949,19 @@ export const handlers = [
       return HttpResponse.json({ message: 'Компания не найдена' }, { status: 404 })
     }
     return HttpResponse.json(company)
+  }),
+
+  http.get('/api/companies/:companyId/departments', async ({ request, params }) => {
+    await delay(180)
+    const token = parseAuth(request)
+    if (token !== MOCK_TOKEN) {
+      return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
+    }
+    const companyId = String(params.companyId ?? '').trim()
+    if (!companyId) {
+      return HttpResponse.json({ message: 'Не указан companyId' }, { status: 400 })
+    }
+    return HttpResponse.json(mockDepartmentsByCompanyId[companyId] ?? [])
   }),
 
   http.get('/api/dashboard/summary', async ({ request }) => {
@@ -1894,6 +1954,7 @@ export const handlers = [
       uuid: row.id,
       code: row.code,
       name: row.name,
+      departmentId: 'dep-1',
       status: row.status,
       updatedAt: row.updatedAt,
       definition:

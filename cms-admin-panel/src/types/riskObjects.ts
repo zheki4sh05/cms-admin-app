@@ -41,6 +41,7 @@ export type RiskObjectCreateResponse = {
 export type RiskObjectCreatePayload = {
   name: string
   definition: Record<string, unknown>
+  departmentId?: string
 }
 
 export type RiskObjectUpdatePayload = RiskObjectCreatePayload & {
@@ -52,6 +53,7 @@ export type RiskObjectDetails = {
   uuid: string
   code: string
   name: string
+  departmentId?: string
   status: RiskObjectStatus
   updatedAt: string
   definition: Record<string, unknown>
