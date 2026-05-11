@@ -864,12 +864,13 @@ export function RiskObjectDetailsPage() {
                     <TableCell>Описание</TableCell>
                     <TableCell>Руководитель</TableCell>
                     <TableCell>Сотрудников</TableCell>
+                    <TableCell align="right">Действие</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
                   {departmentsLoading ? (
                     <TableRow>
-                      <TableCell colSpan={5}>
+                      <TableCell colSpan={6}>
                         <Box sx={{ py: 2, display: 'flex', justifyContent: 'center' }}>
                           <CircularProgress size={24} />
                         </Box>
@@ -877,7 +878,7 @@ export function RiskObjectDetailsPage() {
                     </TableRow>
                   ) : departments.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={5}>
+                      <TableCell colSpan={6}>
                         <Typography variant="body2" color="text.secondary">
                           Отделы не найдены.
                         </Typography>
@@ -900,6 +901,23 @@ export function RiskObjectDetailsPage() {
                         <TableCell>{department.description || '-'}</TableCell>
                         <TableCell>{department.supervisorName || '-'}</TableCell>
                         <TableCell>{department.employeeCount}</TableCell>
+                        <TableCell align="right">
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            color={department.id === departmentId ? 'error' : 'primary'}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              if (!canEdit) return
+                              setDepartmentId((prev) =>
+                                prev === department.id ? '' : department.id,
+                              )
+                            }}
+                            disabled={!canEdit}
+                          >
+                            {department.id === departmentId ? 'Убрать' : 'Выбрать'}
+                          </Button>
+                        </TableCell>
                       </TableRow>
                     ))
                   )}

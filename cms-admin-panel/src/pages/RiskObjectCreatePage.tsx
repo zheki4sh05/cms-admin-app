@@ -638,12 +638,13 @@ export function RiskObjectCreatePage() {
                     <TableCell>Сотрудников</TableCell>
                     <TableCell>Создан</TableCell>
                     <TableCell>Обновлен</TableCell>
+                    <TableCell align="right">Действие</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
                   {departmentsLoading ? (
                     <TableRow>
-                      <TableCell colSpan={7}>
+                      <TableCell colSpan={8}>
                         <Box sx={{ py: 2, display: 'flex', justifyContent: 'center' }}>
                           <CircularProgress size={24} />
                         </Box>
@@ -651,7 +652,7 @@ export function RiskObjectCreatePage() {
                     </TableRow>
                   ) : departments.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={7}>
+                      <TableCell colSpan={8}>
                         <Typography variant="body2" color="text.secondary">
                           Отделы не найдены.
                         </Typography>
@@ -683,6 +684,23 @@ export function RiskObjectCreatePage() {
                           {department.updatedAt
                             ? new Date(department.updatedAt).toLocaleString('ru-RU')
                             : '-'}
+                        </TableCell>
+                        <TableCell align="right">
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            color={department.id === departmentId ? 'error' : 'primary'}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              if (!canManageRiskObjects) return
+                              setDepartmentId((prev) =>
+                                prev === department.id ? '' : department.id,
+                              )
+                            }}
+                            disabled={!canManageRiskObjects}
+                          >
+                            {department.id === departmentId ? 'Убрать' : 'Выбрать'}
+                          </Button>
                         </TableCell>
                       </TableRow>
                     ))

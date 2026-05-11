@@ -37,6 +37,7 @@ import type {
 import type { AccessPermission } from '../types/permissions'
 import type { Company } from '../types/company'
 import type { Department } from '../types/departments'
+import type { MonitoringResultsStatistics } from '../types/monitoringResults'
 
 const COMPANY_ID_STORAGE_KEY = 'trustflow_company_id'
 const REFRESH_ENDPOINT_PATH = '/auth/admin/refresh'
@@ -359,19 +360,27 @@ export async function getCompanyByEmployeeId(
   }
 }
 
-export async function getDashboardSummary(token: string) {
-  const res = await fetch(apiUrl('dashboard/summary'), {
+export async function getMonitoringResultsStatistics(
+  token: string,
+): Promise<MonitoringResultsStatistics> {
+  const res = await fetch(apiUrl('monitoring-results/statistics'), {
     headers: authHeaders(token),
   })
-  const data = (await res.json().catch(() => ({}))) as { message?: string }
-  if (!res.ok) {
-    throw new Error(data.message ?? 'Не удалось загрузить данные')
+  const data = (await res.json().catch(() => ({}))) as {
+    message?: string
+    results?: unknown
+    retries?: unknown
   }
-  return data as {
-    visitsToday: number
-    activeUsers: number
-    openTickets: number
-    revenueWeek: number
+  if (!res.ok) {
+    throw new Error(data.message ?? 'Не удалось загрузить статистику результатов мониторинга')
+  }
+  return {
+    results: Array.isArray(data.results)
+      ? (data.results as MonitoringResultsStatistics['results'])
+      : [],
+    retries: Array.isArray(data.retries)
+      ? (data.retries as MonitoringResultsStatistics['retries'])
+      : [],
   }
 }
 
@@ -481,11 +490,14 @@ export async function getIntegrationConfigs(
   token: string,
   page: number,
   pageSize: number,
+  nameQuery?: string,
 ): Promise<IntegrationConfigListPage> {
   const params = new URLSearchParams({
     page: String(page),
     pageSize: String(pageSize),
   })
+  const nq = nameQuery?.trim()
+  if (nq) params.set('name', nq)
   const res = await fetch(`${apiUrl('integration-configs')}?${params.toString()}`, {
     headers: authHeaders(token),
   })
@@ -926,11 +938,14 @@ export async function getRiskObjects(
   page: number,
   pageSize: number,
   companyId?: string | null,
+  nameQuery?: string,
 ): Promise<RiskObjectListPage> {
   const params = new URLSearchParams({
     page: String(page),
     pageSize: String(pageSize),
   })
+  const nq = nameQuery?.trim()
+  if (nq) params.set('name', nq)
   const res = await fetch(`${apiUrl('risk-objects')}?${params.toString()}`, {
     headers: authHeaders(token, companyId),
   })

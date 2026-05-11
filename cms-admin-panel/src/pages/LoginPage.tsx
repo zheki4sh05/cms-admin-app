@@ -82,6 +82,8 @@ export function LoginPage() {
     >
       <Link
         href={mainAppUrl}
+        target="_blank"
+        rel="noopener noreferrer"
         underline="hover"
         sx={{
           position: 'absolute',

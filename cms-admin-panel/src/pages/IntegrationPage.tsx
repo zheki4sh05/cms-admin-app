@@ -190,6 +190,8 @@ export function IntegrationPage() {
   const [listHasMore, setListHasMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [listSearchInput, setListSearchInput] = useState('')
+  const [listSearchDebounced, setListSearchDebounced] = useState('')
 
   const [historyItems, setHistoryItems] = useState<IntegrationChangeHistoryEntry[]>([])
   const [historyHasMore, setHistoryHasMore] = useState(true)
@@ -212,9 +214,16 @@ export function IntegrationPage() {
   }, [historySearchInput])
 
   useEffect(() => {
+    const t = window.setTimeout(() => {
+      setListSearchDebounced(listSearchInput.trim())
+    }, 350)
+    return () => window.clearTimeout(t)
+  }, [listSearchInput])
+
+  useEffect(() => {
     if (!token) return
     setListPage(1)
-  }, [token])
+  }, [token, listSearchDebounced])
 
   const fetchHistoryPage = useCallback(
     async (page: number, append: boolean) => {
@@ -246,7 +255,7 @@ export function IntegrationPage() {
     let cancelled = false
     setLoading(true)
     setError(null)
-    getIntegrationConfigs(token, listPage, LIST_PAGE_SIZE)
+    getIntegrationConfigs(token, listPage, LIST_PAGE_SIZE, listSearchDebounced || undefined)
       .then(({ items, hasMore }) => {
         if (!cancelled) {
           setRows(items)
@@ -264,7 +273,7 @@ export function IntegrationPage() {
     return () => {
       cancelled = true
     }
-  }, [token, listPage])
+  }, [token, listPage, listSearchDebounced])
 
   useEffect(() => {
     if (!token) return
@@ -372,6 +381,40 @@ export function IntegrationPage() {
           {error}
         </Alert>
       ) : null}
+
+      <Paper variant="outlined" sx={{ mb: 2, px: { xs: 1, sm: 2 }, py: 1.5 }}>
+        <Toolbar
+          disableGutters
+          variant="dense"
+          sx={{ flexWrap: 'wrap', gap: 1.5, minHeight: 'auto', py: 0.5 }}
+        >
+          <TextField
+            size="small"
+            placeholder="Поиск по наименованию…"
+            value={listSearchInput}
+            onChange={(e) => setListSearchInput(e.target.value)}
+            sx={{ flex: '1 1 220px', minWidth: 180, maxWidth: 480 }}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon fontSize="small" color="action" />
+                </InputAdornment>
+              ),
+              endAdornment: listSearchInput ? (
+                <InputAdornment position="end">
+                  <IconButton
+                    size="small"
+                    aria-label="Очистить поиск интеграций"
+                    onClick={() => setListSearchInput('')}
+                  >
+                    <ClearIcon fontSize="small" />
+                  </IconButton>
+                </InputAdornment>
+              ) : null,
+            }}
+          />
+        </Toolbar>
+      </Paper>
 
       <TableContainer
         component={Paper}

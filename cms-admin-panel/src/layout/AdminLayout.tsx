@@ -5,6 +5,7 @@ import {
   Button,
   Drawer,
   IconButton,
+  Link,
   List,
   ListItemButton,
   ListItemIcon,
@@ -21,6 +22,7 @@ import GavelOutlinedIcon from '@mui/icons-material/GavelOutlined'
 import HubOutlinedIcon from '@mui/icons-material/HubOutlined'
 import LogoutOutlinedIcon from '@mui/icons-material/LogoutOutlined'
 import MenuIcon from '@mui/icons-material/Menu'
+import OpenInNewOutlinedIcon from '@mui/icons-material/OpenInNewOutlined'
 import PeopleOutlinedIcon from '@mui/icons-material/PeopleOutlined'
 import PersonOutlinedIcon from '@mui/icons-material/PersonOutlined'
 import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined'
@@ -136,6 +138,7 @@ function drawerContent({
   const visibleBottomItems = loading
     ? navItemsBottom
     : navItemsBottom.filter((item) => canViewPage(permissions, item.requiredViewPermission))
+  const mainAppUrl = (import.meta.env.VITE_MAIN_APP_URL ?? '').trim() || '/'
 
   return (
     <Box
@@ -189,6 +192,38 @@ function drawerContent({
       >
         {visibleBottomItems.length > 0 ? navList(visibleBottomItems, onNavigate) : null}
       </Box>
+      <Link
+        href={mainAppUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        underline="none"
+        onClick={() => onNavigate?.()}
+        sx={(theme) => ({
+          alignSelf: 'stretch',
+          mx: 1,
+          mt: 1,
+          mb: 0.5,
+          px: 1.25,
+          py: 1,
+          borderRadius: 2,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 1,
+          flexShrink: 0,
+          fontSize: '0.8125rem',
+          fontWeight: 600,
+          color: 'primary.dark',
+          bgcolor: alpha(theme.palette.primary.main, 0.08),
+          border: `1px solid ${alpha(theme.palette.primary.main, 0.22)}`,
+          '&:hover': {
+            bgcolor: alpha(theme.palette.primary.main, 0.14),
+            borderColor: alpha(theme.palette.primary.main, 0.35),
+          },
+        })}
+      >
+        <OpenInNewOutlinedIcon sx={{ fontSize: 18, opacity: 0.85 }} />
+        Перейти в основное приложение
+      </Link>
       <Button
         variant="text"
         size="medium"

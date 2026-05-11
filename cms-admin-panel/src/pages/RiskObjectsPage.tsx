@@ -72,6 +72,9 @@ export function RiskObjectsPage() {
   const [historySearchInput, setHistorySearchInput] = useState('')
   const [historySearchDebounced, setHistorySearchDebounced] = useState('')
 
+  const [listSearchInput, setListSearchInput] = useState('')
+  const [listSearchDebounced, setListSearchDebounced] = useState('')
+
   const historyScrollRef = useRef<HTMLDivElement | null>(null)
   const historySentinelRef = useRef<HTMLDivElement | null>(null)
   const historyLastPageRef = useRef(0)
@@ -85,16 +88,28 @@ export function RiskObjectsPage() {
   }, [historySearchInput])
 
   useEffect(() => {
+    const t = window.setTimeout(() => {
+      setListSearchDebounced(listSearchInput.trim())
+    }, 350)
+    return () => window.clearTimeout(t)
+  }, [listSearchInput])
+
+  useEffect(() => {
     if (!token) return
     setListPage(1)
-  }, [token])
+  }, [token, listSearchDebounced])
+
+  const handleClearListSearch = useCallback(() => {
+    setListSearchInput('')
+    setListSearchDebounced('')
+  }, [])
 
   useEffect(() => {
     if (!token) return
     let cancelled = false
     setListLoading(true)
     setListError(null)
-    getRiskObjects(token, listPage, LIST_PAGE_SIZE)
+    getRiskObjects(token, listPage, LIST_PAGE_SIZE, undefined, listSearchDebounced || undefined)
       .then(({ items, hasMore }) => {
         if (!cancelled) {
           setRows(items)
@@ -112,7 +127,7 @@ export function RiskObjectsPage() {
     return () => {
       cancelled = true
     }
-  }, [token, listPage])
+  }, [token, listPage, listSearchDebounced])
 
   const fetchHistoryPage = useCallback(
     async (page: number, append: boolean) => {
@@ -229,6 +244,49 @@ export function RiskObjectsPage() {
         </Alert>
       ) : null}
 
+      <Paper variant="outlined" sx={{ mb: 2, px: { xs: 1, sm: 2 }, py: 1.5 }}>
+        <Toolbar
+          disableGutters
+          variant="dense"
+          sx={{ flexWrap: 'wrap', gap: 1.5, minHeight: 'auto', py: 0.5 }}
+        >
+          <TextField
+            size="small"
+            placeholder="Поиск по наименованию…"
+            value={listSearchInput}
+            onChange={(e) => setListSearchInput(e.target.value)}
+            sx={{ flex: '1 1 240px', minWidth: 200, maxWidth: 520 }}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon fontSize="small" color="action" />
+                </InputAdornment>
+              ),
+              endAdornment: listSearchInput ? (
+                <InputAdornment position="end">
+                  <IconButton
+                    size="small"
+                    aria-label="Очистить поиск"
+                    onClick={handleClearListSearch}
+                  >
+                    <ClearIcon fontSize="small" />
+                  </IconButton>
+                </InputAdornment>
+              ) : null,
+            }}
+          />
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<ClearIcon />}
+            onClick={handleClearListSearch}
+            disabled={!listSearchInput.trim() && !listSearchDebounced}
+          >
+            Сбросить поиск
+          </Button>
+        </Toolbar>
+      </Paper>
+
       <TableContainer component={Paper} variant="outlined" sx={{ mb: 4, overflowX: 'auto' }}>
         <Table size="small" sx={{ minWidth: 640 }}>
           <TableHead>
@@ -251,31 +309,43 @@ export function RiskObjectsPage() {
                     </TableCell>
                   </TableRow>
                 ))
-              : rows.map((row) => (
-                  <TableRow key={row.id} hover>
-                    <TableCell>{row.code}</TableCell>
-                    <TableCell>{row.name}</TableCell>
-                    <TableCell>
-                      <Chip
-                        size="small"
-                        label={row.status === 'active' ? 'Активен' : 'Отключен'}
-                        color={row.status === 'active' ? 'success' : 'default'}
-                        variant={row.status === 'active' ? 'filled' : 'outlined'}
-                      />
-                    </TableCell>
-                    <TableCell>{formatDateTime(row.updatedAt)}</TableCell>
-                    <TableCell align="right">
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        startIcon={<VisibilityOutlinedIcon fontSize="small" />}
-                        onClick={() => navigate(`/app/risk-objects/${row.id}`)}
-                      >
-                        Просмотреть
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
+              : rows.length === 0
+                ? (
+                    <TableRow>
+                      <TableCell colSpan={5}>
+                        <Typography variant="body2" color="text.secondary" sx={{ py: 2 }}>
+                          {listSearchDebounced
+                            ? 'Ничего не найдено. Измените запрос или очистите поиск.'
+                            : 'Рисковые объекты отсутствуют.'}
+                        </Typography>
+                      </TableCell>
+                    </TableRow>
+                  )
+                : rows.map((row) => (
+                    <TableRow key={row.id} hover>
+                      <TableCell>{row.code}</TableCell>
+                      <TableCell>{row.name}</TableCell>
+                      <TableCell>
+                        <Chip
+                          size="small"
+                          label={row.status === 'active' ? 'Активен' : 'Отключен'}
+                          color={row.status === 'active' ? 'success' : 'default'}
+                          variant={row.status === 'active' ? 'filled' : 'outlined'}
+                        />
+                      </TableCell>
+                      <TableCell>{formatDateTime(row.updatedAt)}</TableCell>
+                      <TableCell align="right">
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          startIcon={<VisibilityOutlinedIcon fontSize="small" />}
+                          onClick={() => navigate(`/app/risk-objects/${row.id}`)}
+                        >
+                          Просмотреть
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
           </TableBody>
         </Table>
       </TableContainer>

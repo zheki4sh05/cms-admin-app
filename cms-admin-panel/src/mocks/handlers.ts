@@ -964,17 +964,21 @@ export const handlers = [
     return HttpResponse.json(mockDepartmentsByCompanyId[companyId] ?? [])
   }),
 
-  http.get('/api/dashboard/summary', async ({ request }) => {
-    await delay(350)
+  http.get('/api/monitoring-results/statistics', async ({ request }) => {
+    await delay(280)
     const token = parseAuth(request)
     if (token !== MOCK_TOKEN) {
       return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
     }
+    const sampleRow = {
+      id: 'dacd1e4a-216e-47fd-ad6f-a719f2f42863',
+      riskObjectId: 'ro-internal-id-1',
+      riskObjectName: 'ООО «Вектор»',
+      processDate: '2026-04-12T10:15:00.000Z',
+    }
     return HttpResponse.json({
-      visitsToday: 1284,
-      activeUsers: 42,
-      openTickets: 7,
-      revenueWeek: 184_500,
+      results: [sampleRow],
+      retries: [sampleRow],
     })
   }),
 
@@ -1192,9 +1196,13 @@ export const handlers = [
     const page = Math.max(1, Number.parseInt(url.searchParams.get('page') ?? '1', 10) || 1)
     const rawSize = Number.parseInt(url.searchParams.get('pageSize') ?? '6', 10)
     const pageSize = Math.min(100, Math.max(1, Number.isFinite(rawSize) ? rawSize : 6))
+    const nameQ = (url.searchParams.get('name') ?? '').trim().toLowerCase()
+    const pool = nameQ
+      ? mockIntegrationConfigs.filter((row) => row.name.toLowerCase().includes(nameQ))
+      : mockIntegrationConfigs
     const start = (page - 1) * pageSize
-    const items = mockIntegrationConfigs.slice(start, start + pageSize)
-    const hasMore = start + items.length < mockIntegrationConfigs.length
+    const items = pool.slice(start, start + pageSize)
+    const hasMore = start + items.length < pool.length
     return HttpResponse.json({ items, hasMore })
   }),
 
@@ -1884,9 +1892,13 @@ export const handlers = [
     const page = Math.max(1, Number.parseInt(url.searchParams.get('page') ?? '1', 10) || 1)
     const rawSize = Number.parseInt(url.searchParams.get('pageSize') ?? '6', 10)
     const pageSize = Math.min(100, Math.max(1, Number.isFinite(rawSize) ? rawSize : 6))
+    const nameQ = (url.searchParams.get('name') ?? '').trim().toLowerCase()
+    const pool = nameQ
+      ? mockRiskObjects.filter((row) => row.name.toLowerCase().includes(nameQ))
+      : mockRiskObjects
     const start = (page - 1) * pageSize
-    const items = mockRiskObjects.slice(start, start + pageSize)
-    const hasMore = start + items.length < mockRiskObjects.length
+    const items = pool.slice(start, start + pageSize)
+    const hasMore = start + items.length < pool.length
     return HttpResponse.json({ items, hasMore })
   }),
 
