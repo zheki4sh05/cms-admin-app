@@ -31,7 +31,7 @@ import {
   Typography,
 } from '@mui/material'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import {
   getIntegrationChangeHistory,
   getIntegrationConfigs,
@@ -181,6 +181,7 @@ function matchesIntegrationEntity(
 
 export function IntegrationPage() {
   const navigate = useNavigate()
+  const location = useLocation()
   const { token, hasPermission } = useAuth()
   const { onTextUpdate } = useWebSocket()
   const canManageIntegrations = hasPermission('manage_integrations')
@@ -192,6 +193,7 @@ export function IntegrationPage() {
   const [loading, setLoading] = useState(true)
   const [listSearchInput, setListSearchInput] = useState('')
   const [listSearchDebounced, setListSearchDebounced] = useState('')
+  const [listReloadToken, setListReloadToken] = useState(0)
 
   const [historyItems, setHistoryItems] = useState<IntegrationChangeHistoryEntry[]>([])
   const [historyHasMore, setHistoryHasMore] = useState(true)
@@ -224,6 +226,16 @@ export function IntegrationPage() {
     if (!token) return
     setListPage(1)
   }, [token, listSearchDebounced])
+
+  const removedIntegrationConfigId = (location.state as { removedIntegrationConfigId?: string } | null)
+    ?.removedIntegrationConfigId
+
+  useLayoutEffect(() => {
+    if (!removedIntegrationConfigId) return
+    setRows((prev) => prev.filter((r) => r.id !== removedIntegrationConfigId))
+    setListReloadToken((t) => t + 1)
+    navigate('/app/integration', { replace: true })
+  }, [removedIntegrationConfigId, navigate])
 
   const fetchHistoryPage = useCallback(
     async (page: number, append: boolean) => {
@@ -273,7 +285,7 @@ export function IntegrationPage() {
     return () => {
       cancelled = true
     }
-  }, [token, listPage, listSearchDebounced])
+  }, [token, listPage, listSearchDebounced, listReloadToken])
 
   useEffect(() => {
     if (!token) return
@@ -428,7 +440,7 @@ export function IntegrationPage() {
               <TableCell>Наименование</TableCell>
               <TableCell>Дата последнего изменения</TableCell>
               <TableCell>Состояние</TableCell>
-              <TableCell align="center">Health</TableCell>
+              <TableCell align="center">Здоровье</TableCell>
               <TableCell>Автор</TableCell>
               <TableCell align="right" width={140}>
                 Действия
@@ -465,7 +477,11 @@ export function IntegrationPage() {
                         variant="outlined"
                         startIcon={<VisibilityOutlinedIcon fontSize="small" />}
                         onClick={() => {
-                          navigate(`/app/integration/${row.id}`)
+                          navigate(`/app/integration/${row.id}`, {
+                            state: row.riskObjectModel
+                              ? { integrationRiskObjectModel: row.riskObjectModel }
+                              : undefined,
+                          })
                         }}
                       >
                         Просмотреть

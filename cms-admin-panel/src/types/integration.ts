@@ -1,6 +1,13 @@
 export type IntegrationRuntimeStatus = 'idle' | 'loading' | 'work' | 'failed' | 'stop'
 export type IntegrationHealth = 'good' | 'warning' | 'error'
 
+/** Вложенная ссылка на модель в GET …/integration-configs/:id (id, имя; isDeleted — флаг самой модели). */
+export type IntegrationRiskObjectModelSummary = {
+  id: string
+  name: string
+  isDeleted?: boolean
+}
+
 export type IntegrationConfig = {
   id: string
   number: number
@@ -10,6 +17,7 @@ export type IntegrationConfig = {
   status: IntegrationRuntimeStatus
   health: IntegrationHealth | null
   authorName: string
+  riskObjectModel?: IntegrationRiskObjectModelSummary
 }
 
 export type IntegrationConfigListPage = {
@@ -66,6 +74,7 @@ export type IntegrationDetails = {
   integrationKind: 'pull' | 'push' | 'broker'
   endpointUrl: string
   riskObjectModelId: string
+  riskObjectModel?: IntegrationRiskObjectModelSummary
   mapping_rules: IntegrationMappingRule[]
   pullConfig?: PullIntegrationConfig
   active: boolean

@@ -38,7 +38,7 @@ import {
 } from '@mui/material'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { SyntheticEvent } from 'react'
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams, useLocation } from 'react-router-dom'
 import {
   deleteIntegrationConfigById,
   getIntegrationConfigById,
@@ -47,11 +47,13 @@ import {
   putIntegrationConfigById,
   putIntegrationConfigStatusById,
 } from '../api/client'
+import { DeletedEntityBadge } from '../components/DeletedEntityBadge'
 import { useAuth } from '../auth/AuthContext'
 import type {
   IntegrationRuntimeStatus,
   IntegrationDetails,
   IntegrationMappingRule,
+  IntegrationRiskObjectModelSummary,
   PullIntegrationConfig,
   PullPollingPreset,
   PullRequestQueryParam,
@@ -263,11 +265,36 @@ function matchesIntegrationEntity(
   return false
 }
 
+type IntegrationDetailsNavigateState = {
+  integrationRiskObjectModel?: IntegrationRiskObjectModelSummary
+}
+
+/** Данные вложенной модели из GET карточки и из location.state (переход со списка интеграций). */
+function mergeIntegrationRiskObjectModelSummary(
+  currentModelId: string,
+  fromApi: IntegrationRiskObjectModelSummary | undefined,
+  fromNav: IntegrationRiskObjectModelSummary | undefined,
+): IntegrationRiskObjectModelSummary | null {
+  const id = currentModelId.trim()
+  const api = fromApi && fromApi.id.trim() === id ? fromApi : undefined
+  const nav = fromNav && fromNav.id.trim() === id ? fromNav : undefined
+  if (!api && !nav) return null
+  if (!api) return nav ?? null
+  if (!nav) return api
+  const isDeleted = api.isDeleted === true || nav.isDeleted === true
+  return {
+    id: api.id,
+    name: api.name || nav.name,
+    ...(isDeleted ? { isDeleted: true as const } : {}),
+  }
+}
+
 export function IntegrationDetailsPage() {
   const navigate = useNavigate()
+  const location = useLocation()
   const { id = '' } = useParams()
   const [searchParams] = useSearchParams()
-  const { token, hasPermission } = useAuth()
+  const { token, user, hasPermission } = useAuth()
   const { onTextUpdate } = useWebSocket()
   const isReadOnlyView = searchParams.get('readonly') === '1'
   const canManageIntegrations = hasPermission('manage_integrations')
@@ -289,6 +316,8 @@ export function IntegrationDetailsPage() {
   const [integrationKind, setIntegrationKind] = useState<IntegrationDetails['integrationKind']>('pull')
   const [endpointUrl, setEndpointUrl] = useState('')
   const [riskObjectModelId, setRiskObjectModelId] = useState('')
+  const [linkedRiskObjectModel, setLinkedRiskObjectModel] =
+    useState<IntegrationRiskObjectModelSummary | null>(null)
   const [pullConfig, setPullConfig] = useState<PullIntegrationConfig>(createDefaultPullConfig())
   const [pullQueryParams, setPullQueryParams] = useState<PullRequestParamRow[]>([])
   const [showPullBasicPassword, setShowPullBasicPassword] = useState(false)
@@ -478,8 +507,10 @@ export function IntegrationDetailsPage() {
     let cancelled = false
     setLoading(true)
     setError(null)
+    setLinkedRiskObjectModel(null)
     setRiskModelsLoading(true)
     setRiskModelsError(null)
+    const navModel = (location.state as IntegrationDetailsNavigateState | null)?.integrationRiskObjectModel
     Promise.all([getIntegrationConfigById(token, id), getRiskObjectModels(token)])
       .then(([details, models]) => {
         if (cancelled) return
@@ -493,6 +524,13 @@ export function IntegrationDetailsPage() {
         setIntegrationKind(details.integrationKind)
         setEndpointUrl(details.endpointUrl)
         setRiskObjectModelId(details.riskObjectModelId)
+        setLinkedRiskObjectModel(
+          mergeIntegrationRiskObjectModelSummary(
+            details.riskObjectModelId,
+            details.riskObjectModel,
+            navModel,
+          ),
+        )
         const nextPullConfig: PullIntegrationConfig = {
           ...createDefaultPullConfig(),
           ...(details.pullConfig ?? {}),
@@ -539,7 +577,7 @@ export function IntegrationDetailsPage() {
     return () => {
       cancelled = true
     }
-  }, [token, id])
+  }, [token, id, location.key])
 
   useEffect(() => {
     return onTextUpdate((payload) => {
@@ -777,17 +815,16 @@ export function IntegrationDetailsPage() {
   }, [name, integrationKind, endpointUrl, riskObjectModelId, mappingRows, normalizedPullPayload, showToast])
 
   const handleDelete = useCallback(async () => {
-    if (isReadOnlyView || !canManageIntegrations) return
+    if (!canEdit) return
     if (!token || !id) {
       showToast({ severity: 'error', text: 'Нет сессии — войдите снова.' })
       return
     }
     setDeleting(true)
     try {
-      await deleteIntegrationConfigById(token, id)
+      await deleteIntegrationConfigById(token, id, user?.companyId ?? null)
       setDeleteDialogOpen(false)
-      showToast({ severity: 'success', text: 'Интеграция удалена.' })
-      navigate('/app/integration')
+      navigate('/app/integration', { replace: true, state: { removedIntegrationConfigId: id } })
     } catch (e: unknown) {
       showToast({
         severity: 'error',
@@ -796,7 +833,7 @@ export function IntegrationDetailsPage() {
     } finally {
       setDeleting(false)
     }
-  }, [isReadOnlyView, canManageIntegrations, token, id, showToast, navigate])
+  }, [canEdit, token, id, user?.companyId, navigate, showToast])
 
   if (loading) {
     return (
@@ -852,7 +889,7 @@ export function IntegrationDetailsPage() {
             color="error"
             startIcon={<DeleteOutlinedIcon />}
             onClick={() => setDeleteDialogOpen(true)}
-            disabled={isReadOnlyView || !canManageIntegrations || deleting}
+            disabled={!canEdit || deleting}
           >
             Удалить
           </Button>
@@ -966,11 +1003,18 @@ export function IntegrationDetailsPage() {
         </DialogActions>
       </Dialog>
 
-      <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>
-        <DialogTitle>Удалить интеграцию?</DialogTitle>
+      <Dialog
+        open={deleteDialogOpen}
+        onClose={() => {
+          if (!deleting) setDeleteDialogOpen(false)
+        }}
+        disableEscapeKeyDown={deleting}
+      >
+        <DialogTitle>Подтверждение удаления</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            Интеграция будет удалена без возможности восстановления.
+            Удалить интеграцию «{name || id}»? Действие необратимо: запись исчезнет из списка после успешного ответа
+            сервера.
           </DialogContentText>
         </DialogContent>
         <DialogActions>
@@ -984,7 +1028,7 @@ export function IntegrationDetailsPage() {
             onClick={() => void handleDelete()}
             disabled={deleting}
           >
-            {deleting ? 'Удаление...' : 'Удалить'}
+            {deleting ? 'Удаление…' : 'Да, удалить'}
           </Button>
         </DialogActions>
       </Dialog>
@@ -1328,9 +1372,15 @@ export function IntegrationDetailsPage() {
             disabled={!canEdit || riskModelsLoading || riskModels.length === 0}
             error={Boolean(riskModelsError)}
           >
-            <FormLabel id="risk-object-model-label" sx={{ mb: 0.75, display: 'block' }}>
-              Модель рискового объекта
-            </FormLabel>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.75, flexWrap: 'wrap' }}>
+              <FormLabel id="risk-object-model-label" sx={{ mb: 0 }}>
+                Модель рискового объекта
+              </FormLabel>
+              {linkedRiskObjectModel?.isDeleted === true &&
+              linkedRiskObjectModel.id === riskObjectModelId ? (
+                <DeletedEntityBadge tooltip="Эта модель рискового объекта удалена и перенесена в историю изменений." />
+              ) : null}
+            </Box>
             <Select
               aria-labelledby="risk-object-model-label"
               value={riskObjectModelId}
@@ -1348,12 +1398,37 @@ export function IntegrationDetailsPage() {
                   )
                 }
                 const m = riskModels.find((x) => x.id === selected)
-                return m ? m.name : selected
+                if (m) {
+                  return (
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                      <span>{m.name}</span>
+                      {m.isDeleted ? (
+                        <DeletedEntityBadge tooltip="Эта модель рискового объекта удалена и перенесена в историю изменений." />
+                      ) : null}
+                    </Box>
+                  )
+                }
+                if (linkedRiskObjectModel?.id === selected && linkedRiskObjectModel.name) {
+                  return (
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                      <span>{linkedRiskObjectModel.name}</span>
+                      {linkedRiskObjectModel.isDeleted ? (
+                        <DeletedEntityBadge tooltip="Эта модель рискового объекта удалена и перенесена в историю изменений." />
+                      ) : null}
+                    </Box>
+                  )
+                }
+                return selected
               }}
             >
               {riskModels.map((m) => (
                 <MenuItem key={m.id} value={m.id}>
-                  {m.name}
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                    <span>{m.name}</span>
+                    {m.isDeleted ? (
+                      <DeletedEntityBadge tooltip="Эта модель рискового объекта удалена и перенесена в историю изменений." />
+                    ) : null}
+                  </Box>
                 </MenuItem>
               ))}
             </Select>

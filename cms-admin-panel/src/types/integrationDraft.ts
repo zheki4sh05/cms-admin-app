@@ -8,7 +8,7 @@ export type IntegrationMappingRule = {
 }
 
 /** Элемент каталога моделей (ответ GET /api/risk-object-models). */
-export type RiskObjectModelListItem = { id: string; name: string }
+export type RiskObjectModelListItem = { id: string; name: string; isDeleted?: boolean }
 
 /** Полная модель с полем definition (ответ GET /api/risk-object-models/:id). */
 export type RiskObjectModel = {

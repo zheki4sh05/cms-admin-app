@@ -785,6 +785,7 @@ function buildMockRiskObjectChangeHistory(count: number) {
       riskObjectId,
       changedAt: `2026-04-${pad(day)}T${pad(hour)}:${pad(minute)}:00.000Z`,
       riskObjectName: t.riskObjectName,
+      changeComment: `${t.description} (#${i + 1})`,
       description: `${t.description} (#${i + 1})`,
       authorName: t.authorName,
     }
@@ -931,24 +932,6 @@ export const handlers = [
       })
     }
     return HttpResponse.json(currentAuthAccount.user)
-  }),
-
-  http.get('/api/companies/by-employee/:employeeId', async ({ request, params }) => {
-    await delay(220)
-    const token = parseAuth(request)
-    if (token !== MOCK_TOKEN) {
-      return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
-    }
-    const employeeId = String(params.employeeId ?? '')
-    const employee = demoAuthAccounts.find((item) => item.user.id === employeeId)
-    if (!employee) {
-      return HttpResponse.json({ message: 'Сотрудник не найден' }, { status: 404 })
-    }
-    const company = mockCompanies.find((item) => item.id === employee.user.companyId)
-    if (!company) {
-      return HttpResponse.json({ message: 'Компания не найдена' }, { status: 404 })
-    }
-    return HttpResponse.json(company)
   }),
 
   http.get('/api/companies/:companyId/departments', async ({ request, params }) => {
@@ -1572,6 +1555,18 @@ export const handlers = [
     return HttpResponse.json({ id: ruleId, riskObjectId })
   }),
 
+  http.get('/api/risks/processing/statistic', async ({ request }) => {
+    await delay(200)
+    const token = parseAuth(request)
+    if (token !== MOCK_TOKEN) {
+      return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
+    }
+    return HttpResponse.json({
+      outboxCount: 42,
+      verificationResultCount: 128,
+    })
+  }),
+
   http.get('/api/risks', async ({ request }) => {
     await delay(220)
     const token = parseAuth(request)
@@ -2036,6 +2031,25 @@ export const handlers = [
       updatedAt,
     }
     return HttpResponse.json({ id, savedAt: updatedAt })
+  }),
+
+  http.delete('/api/risk-objects/:id', async ({ request, params }) => {
+    await delay(220)
+    const token = parseAuth(request)
+    if (token !== MOCK_TOKEN) {
+      return HttpResponse.json({ message: 'Требуется вход' }, { status: 401 })
+    }
+    const companyId = request.headers.get('CompanyId')?.trim()
+    if (!companyId) {
+      return HttpResponse.json({ message: 'Требуется заголовок CompanyId' }, { status: 400 })
+    }
+    const id = String(params.id ?? '')
+    const idx = mockRiskObjects.findIndex((r) => r.id === id)
+    if (idx < 0) {
+      return HttpResponse.json({ message: 'Объект не найден' }, { status: 404 })
+    }
+    mockRiskObjects.splice(idx, 1)
+    return new HttpResponse(null, { status: 204 })
   }),
 
   http.put('/api/settings', async ({ request }) => {

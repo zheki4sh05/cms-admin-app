@@ -5,6 +5,7 @@ import type {
   IntegrationConfigListPage,
   IntegrationDeleteResponse,
   IntegrationDetails,
+  IntegrationRiskObjectModelSummary,
   PullIntegrationConfig,
   PullRequestQueryParam,
   IntegrationStatusUpdatePayload,
@@ -28,6 +29,7 @@ import type {
   RiskCreatePayload,
   RiskCreateResponse,
   RiskItem,
+  RisksProcessingStatistic,
   RuleChangeHistoryDetails,
   RuleCreatePayload,
   RuleCreateResponse,
@@ -35,7 +37,6 @@ import type {
   RuleUpdatePayload,
 } from '../types/risks'
 import type { AccessPermission } from '../types/permissions'
-import type { Company } from '../types/company'
 import type { Department } from '../types/departments'
 import type { MonitoringResultsStatistics } from '../types/monitoringResults'
 
@@ -178,6 +179,17 @@ function normalizeIntegrationHealth(value: unknown): IntegrationConfig['health']
 
 function normalizeIntegrationActive(value: unknown): boolean | null {
   return typeof value === 'boolean' ? value : null
+}
+
+function normalizeIntegrationRiskObjectModelSummary(
+  value: unknown,
+): IntegrationRiskObjectModelSummary | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const o = value as Record<string, unknown>
+  if (typeof o.id !== 'string' || !o.id.trim()) return undefined
+  const name = typeof o.name === 'string' ? o.name : ''
+  const isDeleted = o.isDeleted === true
+  return { id: o.id.trim(), name, ...(isDeleted ? { isDeleted: true as const } : {}) }
 }
 
 function normalizeNonNegativeNumber(value: unknown): number | null {
@@ -334,30 +346,6 @@ export async function getMe(token: string) {
     throw new Error(data.message ?? 'Ошибка загрузки профиля')
   }
   return data
-}
-
-export async function getCompanyByEmployeeId(
-  token: string,
-  employeeId: string,
-): Promise<Company> {
-  const res = await fetch(apiUrl(`companies/by-employee/${employeeId}`), {
-    headers: authHeaders(token),
-  })
-  const data = (await res.json().catch(() => ({}))) as {
-    message?: string
-    id?: string
-    name?: string
-  }
-  if (!res.ok) {
-    throw new Error(data.message ?? 'Ошибка загрузки компании')
-  }
-  if (!data.id || !data.name) {
-    throw new Error('Некорректный ответ сервера')
-  }
-  return {
-    id: data.id,
-    name: data.name,
-  }
 }
 
 export async function getMonitoringResultsStatistics(
@@ -529,6 +517,7 @@ export async function getIntegrationConfigs(
           ) {
             return null
           }
+          const riskObjectModel = normalizeIntegrationRiskObjectModelSummary(row.riskObjectModel)
           return {
             id: row.id,
             number,
@@ -538,6 +527,7 @@ export async function getIntegrationConfigs(
             status,
             health,
             authorName: row.authorName,
+            ...(riskObjectModel ? { riskObjectModel } : {}),
           } satisfies IntegrationConfig
         })
         .filter((item): item is IntegrationConfig => item !== null)
@@ -594,6 +584,7 @@ export async function getIntegrationConfigById(
   ) {
     throw new Error('Некорректный ответ сервера')
   }
+  const riskObjectModel = normalizeIntegrationRiskObjectModelSummary(data.riskObjectModel)
   return {
     id: data.id,
     number,
@@ -601,6 +592,7 @@ export async function getIntegrationConfigById(
     integrationKind,
     endpointUrl: data.endpointUrl,
     riskObjectModelId: data.riskObjectModelId,
+    ...(riskObjectModel ? { riskObjectModel } : {}),
     mapping_rules: mappingRules,
     ...(pullConfig ? { pullConfig } : {}),
     active,
@@ -957,8 +949,34 @@ export async function getRiskObjects(
   if (!res.ok) {
     throw new Error(data.message ?? 'Не удалось загрузить рисковые объекты')
   }
+  const items = Array.isArray(data.items)
+    ? data.items
+        .map((item) => {
+          if (!item || typeof item !== 'object' || Array.isArray(item)) return null
+          const row = item as Record<string, unknown>
+          if (
+            typeof row.id !== 'string' ||
+            typeof row.code !== 'string' ||
+            typeof row.name !== 'string' ||
+            (row.status !== 'active' && row.status !== 'archived') ||
+            typeof row.updatedAt !== 'string'
+          ) {
+            return null
+          }
+          const isDeleted = row.isDeleted === true
+          return {
+            id: row.id,
+            code: row.code,
+            name: row.name,
+            status: row.status,
+            updatedAt: row.updatedAt,
+            ...(isDeleted ? { isDeleted: true as const } : {}),
+          } satisfies RiskObject
+        })
+        .filter((item): item is RiskObject => item !== null)
+    : []
   return {
-    items: (data.items ?? []) as RiskObject[],
+    items,
     hasMore: Boolean(data.hasMore),
   }
 }
@@ -975,6 +993,33 @@ export async function getRisks(token: string, companyId?: string | null): Promis
     throw new Error(data.message ?? 'Не удалось загрузить риски')
   }
   return data.items ?? []
+}
+
+export async function getRisksProcessingStatistic(
+  token: string,
+  companyId?: string | null,
+): Promise<RisksProcessingStatistic> {
+  const res = await fetch(apiUrl('risks/processing/statistic'), {
+    headers: authHeaders(token, companyId),
+  })
+  const data = (await res.json().catch(() => ({}))) as {
+    message?: string
+    outboxCount?: unknown
+    verificationResultCount?: unknown
+  }
+  if (!res.ok) {
+    throw new Error(data.message ?? 'Не удалось загрузить статистику обработки рисков')
+  }
+  const outbox =
+    typeof data.outboxCount === 'number' && Number.isFinite(data.outboxCount)
+      ? data.outboxCount
+      : 0
+  const verification =
+    typeof data.verificationResultCount === 'number' &&
+    Number.isFinite(data.verificationResultCount)
+      ? data.verificationResultCount
+      : 0
+  return { outboxCount: outbox, verificationResultCount: verification }
 }
 
 const RFC4122_UUID_RE =
@@ -1500,7 +1545,22 @@ export async function getRiskObjectModels(token: string): Promise<RiskObjectMode
   if (!res.ok) {
     throw new Error(data.message ?? 'Не удалось загрузить модели рисковых объектов')
   }
-  return data.items ?? []
+  const items = Array.isArray(data.items)
+    ? data.items
+        .map((item) => {
+          if (!item || typeof item !== 'object' || Array.isArray(item)) return null
+          const row = item as Record<string, unknown>
+          if (typeof row.id !== 'string' || typeof row.name !== 'string') return null
+          const isDeleted = row.isDeleted === true
+          return {
+            id: row.id,
+            name: row.name,
+            ...(isDeleted ? { isDeleted: true as const } : {}),
+          } satisfies RiskObjectModelListItem
+        })
+        .filter((item): item is RiskObjectModelListItem => item !== null)
+    : []
+  return items
 }
 
 export async function getRiskObjectModelById(token: string, id: string): Promise<RiskObjectModel> {
@@ -1550,6 +1610,7 @@ export async function getRiskObjectById(
     updatedAt?: string
     departmentId?: string
     definition?: string
+    isDeleted?: boolean
   }
   if (!res.ok) {
     throw new Error(data.message ?? 'Не удалось загрузить рисковый объект')
@@ -1573,6 +1634,7 @@ export async function getRiskObjectById(
     throw new Error('Не удалось получить UUID рискового объекта')
   }
   const definition = parseDefinitionObject(data.definition)
+  const isDeleted = data.isDeleted === true
   return {
     id: data.id,
     uuid: uuidCandidate,
@@ -1585,6 +1647,7 @@ export async function getRiskObjectById(
     status: data.status,
     updatedAt: data.updatedAt,
     definition,
+    ...(isDeleted ? { isDeleted: true as const } : {}),
   }
 }
 
@@ -1612,6 +1675,23 @@ export async function putRiskObjectById(
   return { id: data.id, savedAt: data.savedAt }
 }
 
+export async function deleteRiskObjectById(
+  token: string,
+  riskObjectId: string,
+  companyId?: string | null,
+): Promise<void> {
+  const effectiveCompanyId = requireCompanyId(companyId)
+  const res = await fetch(apiUrl(`risk-objects/${riskObjectId}`), {
+    method: 'DELETE',
+    headers: authHeaders(token, effectiveCompanyId),
+  })
+  if (res.ok) {
+    return
+  }
+  const data = (await res.json().catch(() => ({}))) as { message?: string }
+  throw new Error(data.message ?? 'Не удалось удалить рисковый объект')
+}
+
 export async function putRiskObjectStatusById(
   token: string,
   id: string,
@@ -1634,6 +1714,68 @@ export async function putRiskObjectStatusById(
     throw new Error('Некорректный ответ сервера')
   }
   return { id: data.id, savedAt: data.savedAt }
+}
+
+/** Бэкенд принимает только `roh-<целое>`; в списке истории `id` иногда приходит числом, без префикса или в поле `historyId`. */
+function resolveRiskObjectChangeHistoryRecordId(raw: Record<string, unknown>): string | undefined {
+  const candidates: unknown[] = [
+    raw.historyId,
+    raw.changeHistoryId,
+    raw.history_id,
+    raw.change_history_id,
+    raw.id,
+  ]
+  for (const v of candidates) {
+    if (v === undefined || v === null) continue
+    const str =
+      typeof v === 'number' && Number.isFinite(v) ? String(Math.trunc(v)) : String(v).trim()
+    if (!str) continue
+    if (/^roh-\d+$/i.test(str)) {
+      return `roh-${str.slice(4)}`
+    }
+    if (/^\d+$/.test(str)) {
+      return `roh-${str}`
+    }
+  }
+  return undefined
+}
+
+function normalizeRiskObjectHistoryListItem(raw: Record<string, unknown>): RiskObjectHistoryPage['items'][number] {
+  const id =
+    resolveRiskObjectChangeHistoryRecordId(raw) ??
+    (typeof raw.id === 'string' || typeof raw.id === 'number' ? String(raw.id).trim() : '')
+  const riskObjectName =
+    (typeof raw.name === 'string' && raw.name) ||
+    (typeof raw.riskObjectName === 'string' && raw.riskObjectName) ||
+    ''
+  const changeComment =
+    (typeof raw.changeComment === 'string' && raw.changeComment) ||
+    (typeof raw.description === 'string' && raw.description) ||
+    ''
+  const authorName = typeof raw.authorName === 'string' ? raw.authorName : ''
+  const changedAt = typeof raw.changedAt === 'string' ? raw.changedAt : ''
+  const riskObjectId =
+    typeof raw.riskObjectId === 'string'
+      ? raw.riskObjectId
+      : raw.riskObjectId != null
+        ? String(raw.riskObjectId)
+        : undefined
+  const status =
+    raw.status === 'active' || raw.status === 'archived' ? raw.status : undefined
+  const departmentId =
+    raw.departmentId === null || typeof raw.departmentId === 'string' ? raw.departmentId : undefined
+
+  return {
+    id,
+    riskObjectId,
+    changedAt,
+    riskObjectName,
+    changeComment,
+    description: changeComment,
+    authorName,
+    ...(status !== undefined ? { status } : {}),
+    ...(departmentId !== undefined ? { departmentId } : {}),
+  }
 }
 
 export async function getRiskObjectsChangeHistory(
@@ -1661,14 +1803,18 @@ export async function getRiskObjectsChangeHistory(
   )
   const data = (await res.json().catch(() => ({}))) as {
     message?: string
-    items?: RiskObjectHistoryPage['items']
+    items?: unknown[]
     hasMore?: boolean
   }
   if (!res.ok) {
     throw new Error(data.message ?? 'Не удалось загрузить историю')
   }
+  const rawItems = data.items ?? []
+  const items = rawItems
+    .filter((row): row is Record<string, unknown> => row !== null && typeof row === 'object')
+    .map((row) => normalizeRiskObjectHistoryListItem(row))
   return {
-    items: data.items ?? [],
+    items,
     hasMore: Boolean(data.hasMore),
   }
 }
@@ -1677,7 +1823,9 @@ export async function getRiskObjectChangeHistoryById(
   token: string,
   historyId: string,
 ): Promise<RiskObjectHistoryDetails> {
-  const res = await fetch(apiUrl(`risk-objects/change-history/${historyId}`), {
+  const idParam =
+    resolveRiskObjectChangeHistoryRecordId({ id: historyId }) ?? historyId.trim()
+  const res = await fetch(apiUrl(`risk-objects/change-history/${idParam}`), {
     headers: authHeaders(token),
   })
   const data = (await res.json().catch(() => ({}))) as {
@@ -1686,29 +1834,43 @@ export async function getRiskObjectChangeHistoryById(
     riskObjectId?: string
     changedAt?: string
     riskObjectName?: string
+    name?: string
     description?: string
+    changeComment?: string
     authorName?: string
+    status?: string
+    departmentId?: unknown
   }
   if (!res.ok) {
     throw new Error(data.message ?? 'Не удалось загрузить запись истории')
   }
-  if (
-    !data.id ||
-    !data.riskObjectId ||
-    !data.changedAt ||
-    !data.riskObjectName ||
-    !data.description ||
-    !data.authorName
-  ) {
+  const id =
+    resolveRiskObjectChangeHistoryRecordId(data as Record<string, unknown>) ??
+    (typeof data.id === 'string' ? data.id.trim() : '')
+  const riskObjectName = data.riskObjectName ?? data.name ?? ''
+  const changeComment = data.changeComment ?? data.description ?? ''
+  const description = data.description ?? data.changeComment ?? ''
+  const authorName = typeof data.authorName === 'string' ? data.authorName : ''
+  const status =
+    data.status === 'active' || data.status === 'archived' ? data.status : undefined
+  const departmentId =
+    data.departmentId === null || typeof data.departmentId === 'string'
+      ? data.departmentId
+      : undefined
+
+  if (!id || !data.riskObjectId || !data.changedAt || !riskObjectName) {
     throw new Error('Некорректный ответ сервера')
   }
   return {
-    id: data.id,
+    id,
     riskObjectId: data.riskObjectId,
     changedAt: data.changedAt,
-    riskObjectName: data.riskObjectName,
-    description: data.description,
-    authorName: data.authorName,
+    riskObjectName,
+    changeComment,
+    description,
+    authorName,
+    ...(status !== undefined ? { status } : {}),
+    ...(departmentId !== undefined ? { departmentId } : {}),
   }
 }
 

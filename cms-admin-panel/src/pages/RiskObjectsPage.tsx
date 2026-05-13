@@ -10,12 +10,8 @@ import {
   Button,
   Chip,
   CircularProgress,
-  Divider,
   IconButton,
   InputAdornment,
-  List,
-  ListItem,
-  ListItemText,
   Paper,
   Skeleton,
   Table,
@@ -29,12 +25,13 @@ import {
   Typography,
 } from '@mui/material'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import {
   getRiskObjectChangeHistoryById,
   getRiskObjects,
   getRiskObjectsChangeHistory,
 } from '../api/client'
+import { DeletedEntityBadge } from '../components/DeletedEntityBadge'
 import { useAuth } from '../auth/AuthContext'
 import type { RiskObject, RiskObjectHistoryEntry } from '../types/riskObjects'
 
@@ -54,6 +51,7 @@ function formatDateTime(iso: string) {
 
 export function RiskObjectsPage() {
   const navigate = useNavigate()
+  const location = useLocation()
   const { token, hasPermission } = useAuth()
   const canManageRiskObjects = hasPermission('manage_risk_objects')
   const LIST_PAGE_SIZE = 6
@@ -74,6 +72,7 @@ export function RiskObjectsPage() {
 
   const [listSearchInput, setListSearchInput] = useState('')
   const [listSearchDebounced, setListSearchDebounced] = useState('')
+  const [listReloadToken, setListReloadToken] = useState(0)
 
   const historyScrollRef = useRef<HTMLDivElement | null>(null)
   const historySentinelRef = useRef<HTMLDivElement | null>(null)
@@ -98,6 +97,15 @@ export function RiskObjectsPage() {
     if (!token) return
     setListPage(1)
   }, [token, listSearchDebounced])
+
+  const removedRiskObjectId = (location.state as { removedRiskObjectId?: string } | null)?.removedRiskObjectId
+
+  useLayoutEffect(() => {
+    if (!removedRiskObjectId) return
+    setRows((prev) => prev.filter((r) => r.id !== removedRiskObjectId))
+    setListReloadToken((t) => t + 1)
+    navigate('/app/risk-objects', { replace: true })
+  }, [removedRiskObjectId, navigate])
 
   const handleClearListSearch = useCallback(() => {
     setListSearchInput('')
@@ -127,7 +135,7 @@ export function RiskObjectsPage() {
     return () => {
       cancelled = true
     }
-  }, [token, listPage, listSearchDebounced])
+  }, [token, listPage, listSearchDebounced, listReloadToken])
 
   const fetchHistoryPage = useCallback(
     async (page: number, append: boolean) => {
@@ -324,7 +332,14 @@ export function RiskObjectsPage() {
                 : rows.map((row) => (
                     <TableRow key={row.id} hover>
                       <TableCell>{row.code}</TableCell>
-                      <TableCell>{row.name}</TableCell>
+                      <TableCell>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                          <span>{row.name}</span>
+                          {row.isDeleted ? (
+                            <DeletedEntityBadge tooltip="Рисковый объект удалён и перенесён в историю изменений." />
+                          ) : null}
+                        </Box>
+                      </TableCell>
                       <TableCell>
                         <Chip
                           size="small"
@@ -447,51 +462,40 @@ export function RiskObjectsPage() {
                 </Typography>
               </Box>
             ) : (
-              <List disablePadding>
-                {historyItems.map((entry, index) => (
-                  <Box key={entry.id}>
-                    {index > 0 ? <Divider component="li" /> : null}
-                    <ListItem
-                      alignItems="flex-start"
-                      sx={{ py: 1.5, px: 2, gap: 1.5, justifyContent: 'space-between' }}
-                    >
-                      <ListItemText
-                        primaryTypographyProps={{ variant: 'subtitle2', fontWeight: 600 }}
-                        primary={entry.riskObjectName}
-                        secondaryTypographyProps={{ component: 'div' }}
-                        secondary={
-                          <>
-                            <Typography
-                              component="div"
-                              variant="body2"
-                              sx={{ mt: 0.5, color: 'text.primary' }}
-                            >
-                              {entry.description}
-                            </Typography>
-                            <Typography
-                              component="div"
-                              variant="caption"
-                              color="text.secondary"
-                              sx={{ mt: 0.5 }}
-                            >
-                              {formatDateTime(entry.changedAt)} · {entry.authorName}
-                            </Typography>
-                          </>
-                        }
-                      />
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        startIcon={<VisibilityOutlinedIcon fontSize="small" />}
-                        onClick={() => void handleHistoryView(entry.id)}
-                        disabled={historyOpeningId === entry.id}
-                      >
-                        Просмотреть
-                      </Button>
-                    </ListItem>
-                  </Box>
-                ))}
-              </List>
+              <TableContainer>
+                <Table size="small" stickyHeader sx={{ minWidth: 520 }}>
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Наименование</TableCell>
+                      <TableCell>Комментарий</TableCell>
+                      <TableCell>Изменено</TableCell>
+                      <TableCell align="right" width={160}>
+                        Действия
+                      </TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {historyItems.map((entry) => (
+                      <TableRow key={entry.id} hover>
+                        <TableCell>{entry.riskObjectName}</TableCell>
+                        <TableCell>{entry.changeComment}</TableCell>
+                        <TableCell>{formatDateTime(entry.changedAt)}</TableCell>
+                        <TableCell align="right">
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            startIcon={<VisibilityOutlinedIcon fontSize="small" />}
+                            onClick={() => void handleHistoryView(entry.id)}
+                            disabled={historyOpeningId === entry.id}
+                          >
+                            Просмотреть
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
             )}
 
             <Box ref={historySentinelRef} sx={{ height: 1, width: '100%' }} aria-hidden />

@@ -6,6 +6,8 @@ export type RiskObject = {
   name: string
   status: RiskObjectStatus
   updatedAt: string
+  /** Собственный флаг сущности в GET /api/risk-objects (не путать с вложенными ссылками). */
+  isDeleted?: boolean
 }
 
 export type RiskObjectListPage = {
@@ -14,12 +16,21 @@ export type RiskObjectListPage = {
 }
 
 export type RiskObjectHistoryEntry = {
+  /** Идентификатор записи истории для GET …/risk-objects/change-history/:id (на бэкенде: `roh-<number>`). */
   id: string
+  /** Некоторые ответы API отдают идентификатор истории в отдельном поле вместо `id`. */
+  historyId?: string
   riskObjectId?: string
   changedAt: string
+  /** Наименование объекта на момент записи (в API часто поле `name`). */
   riskObjectName: string
+  /** Комментарий к изменению (в API: `changeComment`). */
+  changeComment: string
+  /** Совместимость со старыми ответами / моками; совпадает с `changeComment` после нормализации. */
   description: string
   authorName: string
+  status?: RiskObjectStatus
+  departmentId?: string | null
 }
 
 export type RiskObjectHistoryDetails = RiskObjectHistoryEntry & {
@@ -57,6 +68,8 @@ export type RiskObjectDetails = {
   status: RiskObjectStatus
   updatedAt: string
   definition: Record<string, unknown>
+  /** Собственный флаг сущности в GET /api/risk-objects/:id */
+  isDeleted?: boolean
 }
 
 export type RiskObjectUpdateResponse = {

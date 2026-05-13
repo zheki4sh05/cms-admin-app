@@ -85,3 +85,9 @@ export type RuleChangeHistoryDetails = RuleChangeHistoryEntry & {
   createdByUserId: string
   savedAt: string
 }
+
+/** Ответ GET /api/risks/processing/statistic */
+export type RisksProcessingStatistic = {
+  outboxCount: number
+  verificationResultCount: number
+}

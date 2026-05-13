@@ -45,6 +45,7 @@ import {
   getRiskObjectModels,
   postIntegrationConfigCreate,
 } from '../api/client'
+import { DeletedEntityBadge } from '../components/DeletedEntityBadge'
 import { useAuth } from '../auth/AuthContext'
 import type {
   IntegrationKind,
@@ -1145,12 +1146,27 @@ export function IntegrationCreatePage() {
                   )
                 }
                 const m = riskModels.find((x) => x.id === selected)
-                return m ? m.name : selected
+                if (m) {
+                  return (
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                      <span>{m.name}</span>
+                      {m.isDeleted ? (
+                        <DeletedEntityBadge tooltip="Эта модель рискового объекта удалена и перенесена в историю изменений." />
+                      ) : null}
+                    </Box>
+                  )
+                }
+                return selected
               }}
             >
               {riskModels.map((m) => (
                 <MenuItem key={m.id} value={m.id}>
-                  {m.name}
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                    <span>{m.name}</span>
+                    {m.isDeleted ? (
+                      <DeletedEntityBadge tooltip="Эта модель рискового объекта удалена и перенесена в историю изменений." />
+                    ) : null}
+                  </Box>
                 </MenuItem>
               ))}
             </Select>

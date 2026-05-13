@@ -40,6 +40,7 @@ import {
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
+  deleteRiskObjectById,
   getCompanyDepartments,
   getRulesList,
   getRiskObjectById,
@@ -47,6 +48,7 @@ import {
   putRiskObjectById,
   putRiskObjectStatusById,
 } from '../api/client'
+import { DeletedEntityBadge } from '../components/DeletedEntityBadge'
 import { useAuth } from '../auth/AuthContext'
 import type { Department } from '../types/departments'
 import type {
@@ -192,6 +194,8 @@ export function RiskObjectDetailsPage() {
   const [saving, setSaving] = useState(false)
   const [statusUpdating, setStatusUpdating] = useState(false)
   const [clearDialogOpen, setClearDialogOpen] = useState(false)
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [deleteSubmitting, setDeleteSubmitting] = useState(false)
   const [saveDialogOpen, setSaveDialogOpen] = useState(false)
   const [saveComment, setSaveComment] = useState('')
   const [saveCommentError, setSaveCommentError] = useState(false)
@@ -218,6 +222,7 @@ export function RiskObjectDetailsPage() {
   const [toast, setToast] = useState<OperationToast | null>(null)
   const [toastOpen, setToastOpen] = useState(false)
   const [showScrollTopButton, setShowScrollTopButton] = useState(false)
+  const [entityIsDeleted, setEntityIsDeleted] = useState(false)
 
   const showToast = useCallback((payload: OperationToast) => {
     setToast(payload)
@@ -252,6 +257,7 @@ export function RiskObjectDetailsPage() {
       .then((data) => {
         if (cancelled) return
         const fields = rootFieldsFromDefinition(data.definition ?? {})
+        setEntityIsDeleted(data.isDeleted === true)
         setName(data.name)
         setCode(data.code)
         setDepartmentId(data.departmentId ?? '')
@@ -443,6 +449,26 @@ export function RiskObjectDetailsPage() {
     setEditingEnabled(false)
     showToast({ severity: 'success', text: 'Изменения сброшены.' })
   }, [initialSnapshot, setFromSnapshot, showToast])
+
+  const handleDeleteObject = useCallback(async () => {
+    if (!token || !id) {
+      showToast({ severity: 'error', text: 'Нет сессии — войдите снова.' })
+      return
+    }
+    setDeleteSubmitting(true)
+    try {
+      await deleteRiskObjectById(token, id, user?.companyId ?? null)
+      setDeleteDialogOpen(false)
+      navigate('/app/risk-objects', { replace: true, state: { removedRiskObjectId: id } })
+    } catch (e: unknown) {
+      showToast({
+        severity: 'error',
+        text: e instanceof Error ? e.message : 'Не удалось удалить объект',
+      })
+    } finally {
+      setDeleteSubmitting(false)
+    }
+  }, [token, id, user?.companyId, navigate, showToast])
 
   const handleSave = useCallback(async () => {
     if (isReadOnlyView || !canManageRiskObjects) return
@@ -686,9 +712,14 @@ export function RiskObjectDetailsPage() {
           mb: 2,
         }}
       >
-        <Typography variant="h5" component="h1">
-          Просмотр рискового объекта
-        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+          <Typography variant="h5" component="h1">
+            Просмотр рискового объекта
+          </Typography>
+          {entityIsDeleted ? (
+            <DeletedEntityBadge tooltip="Этот рисковый объект удалён и перенесён в историю изменений." />
+          ) : null}
+        </Box>
         <Stack direction="row" flexWrap="wrap" sx={{ gap: 1, alignItems: 'center' }}>
           <Button
             size="small"
@@ -714,6 +745,16 @@ export function RiskObjectDetailsPage() {
             disabled={!canEdit}
           >
             Сбросить
+          </Button>
+          <Button
+            size="small"
+            variant="outlined"
+            color="error"
+            startIcon={<DeleteOutlinedIcon />}
+            onClick={() => setDeleteDialogOpen(true)}
+            disabled={!canEdit || deleteSubmitting}
+          >
+            Удалить
           </Button>
         </Stack>
       </Box>
@@ -751,6 +792,36 @@ export function RiskObjectDetailsPage() {
             autoFocus
           >
             Сбросить
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={deleteDialogOpen}
+        onClose={() => {
+          if (!deleteSubmitting) setDeleteDialogOpen(false)
+        }}
+        disableEscapeKeyDown={deleteSubmitting}
+      >
+        <DialogTitle>Подтверждение удаления</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Удалить рисковый объект «{name || code || id}»? Действие необратимо: запись исчезнет из списка после
+            успешного ответа сервера.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteDialogOpen(false)} disabled={deleteSubmitting}>
+            Отмена
+          </Button>
+          <Button
+            color="error"
+            variant="contained"
+            onClick={() => void handleDeleteObject()}
+            disabled={deleteSubmitting}
+            autoFocus
+          >
+            {deleteSubmitting ? 'Удаление…' : 'Да, удалить'}
           </Button>
         </DialogActions>
       </Dialog>
